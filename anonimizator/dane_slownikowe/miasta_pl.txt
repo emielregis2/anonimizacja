@@ -1,0 +1,152 @@
+Warszawa
+Kraków
+Łódź
+Wrocław
+Poznań
+Gdańsk
+Szczecin
+Bydgoszcz
+Lublin
+Białystok
+Katowice
+Gdynia
+Częstochowa
+Radom
+Sosnowiec
+Toruń
+Kielce
+Gliwice
+Zabrze
+Olsztyn
+Bielsko-Biała
+Bytom
+Rzeszów
+Ruda Śląska
+Rybnik
+Tychy
+Opole
+Gorzów Wielkopolski
+Dąbrowa Górnicza
+Elbląg
+Płock
+Wałbrzych
+Włocławek
+Tarnów
+Chorzów
+Koszalin
+Kalisz
+Legnica
+Grudziądz
+Słupsk
+Jaworzno
+Jastrzębie-Zdrój
+Jelenia Góra
+Nowy Sącz
+Jastrzębie
+Siedlce
+Mysłowice
+Zamość
+Piotrków Trybunalski
+Konin
+Inowrocław
+Lubin
+Ostrowiec Świętokrzyski
+Suwałki
+Stargard
+Gniezno
+Ostrów Wielkopolski
+Siemianowice Śląskie
+Głogów
+Pabianice
+Leszno
+Zgierz
+Chełm
+Świdnica
+Piła
+Łomża
+Tomaszów Mazowiecki
+Żory
+Ełk
+Tczew
+Zawiercie
+Stalowa Wola
+Będzin
+Kędzierzyn-Koźle
+Racibórz
+Skierniewice
+Świętochłowice
+Starachowice
+Krosno
+Ostrołęka
+Chrzanów
+Tarnobrzeg
+Bełchatów
+Przemyśl
+Rumia
+Wodzisław Śląski
+Ciechanów
+Puławy
+Świnoujście
+Kutno
+Świecie
+Malbork
+Nysa
+Środa Wielkopolska
+Rybnik
+Zakopane
+Sopot
+Wejherowo
+Sandomierz
+Biała Podlaska
+Mielec
+Oświęcim
+Sieradz
+Radomsko
+Rawicz
+Kołobrzeg
+Otwock
+Piaseczno
+Wołomin
+Legionowo
+Pruszków
+Grodzisk Mazowiecki
+Nowy Targ
+Wieliczka
+Bochnia
+Brzeg
+Kluczbork
+Namysłów
+Kędzierzyn
+Kwidzyn
+Chojnice
+Starogard Gdański
+Iława
+Ostróda
+Giżycko
+Mrągowo
+Kętrzyn
+Bartoszyce
+Działdowo
+Nidzica
+Szczytno
+Pisz
+Augustów
+Sokółka
+Hajnówka
+Bielsk Podlaski
+Łuków
+Radzyń Podlaski
+Międzyrzec Podlaski
+Chełmno
+Brodnica
+Golub-Dobrzyń
+Rypin
+Aleksandrów Kujawski
+Żnin
+Mogilno
+Szubin
+Sępólno Krajeńskie
+Wągrowiec
+Chodzież
+Trzcianka
+Czarnków

@@ -1,0 +1,25 @@
+cryptography>=42.0
+python-docx>=1.1
+pdfplumber>=0.11
+striprtf>=0.0.26
+odfpy>=1.4
+flask>=3.0
+pytesseract>=0.3.13
+pdf2image>=1.17
+pypdf>=5.9
+reportlab>=4.4
+pyperclip>=1.11
+pytest>=8.0
+
+# Opcjonalnie, wyłącznie dla Trybu AI (lokalny NER, bez wysyłania danych na zewnątrz):
+# spacy>=3.7
+# oraz: python -m spacy download pl_core_news_lg
+
+# WYMAGANIA SYSTEMOWE (poza pip) dla OCR (skany PDF, JPG, PNG):
+#   Linux:   sudo apt-get install tesseract-ocr tesseract-ocr-pol tesseract-ocr-eng poppler-utils
+#   Windows: instalator z https://github.com/UB-Mannheim/tesseract/wiki
+#            (zaznaczyć języki: polski + angielski przy instalacji;
+#             angielski jest potrzebny dodatkowo — sam model polski słabiej
+#             rozpoznaje niektóre znaki, np. "@")
+#            + Poppler dla Windows: https://github.com/oschwartz10612/poppler-windows
+#              (dodać folder bin do zmiennej PATH)

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+*.enc
+wynik/
+wynik_bip/
+.DS_Store
