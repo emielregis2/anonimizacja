@@ -195,3 +195,12 @@ anonimizator/
    OCR na rzeczywistych dokumentach firmowych bywa różna.
 4. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
    sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.
+
+## Licencja
+
+Kod projektu: licencja MIT (patrz plik `LICENSE`).
+
+Dołączona czcionka `anonimizator/czcionki/DejaVuSans*.ttf` (używana do
+generowania polskich znaków w raporcie PDF) objęta jest własną, permisywną
+licencją Bitstream Vera / DejaVu Fonts License, pozwalającą na swobodną
+redystrybucję — szczegóły: https://dejavu-fonts.github.io/License.html
