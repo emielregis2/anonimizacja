@@ -34,6 +34,23 @@ Wszystkie 9 funkcji, o które prosiłeś, są teraz zaimplementowane:
 
 Uczciwie o granicach tej realizacji — patrz sekcja "Znane ograniczenia" niżej.
 
+## Nazewnictwo i format pliku wynikowego
+
+Plik wynikowy **zachowuje format pliku źródłowego** i dostaje przyrostek
+`_anon`:
+
+| Plik wejściowy | Plik wynikowy |
+|---|---|
+| `test.pdf` | `test_anon.pdf` |
+| `umowa.docx` | `umowa_anon.docx` |
+| `pismo.odt` | `pismo_anon.odt` |
+| `notatka.rtf` | `notatka_anon.rtf` |
+| `skan.png` | `skan_anon.png` (nowy obraz z narysowaną treścią) |
+| `dokument.txt` | `dokument_anon.txt` |
+
+Tryb Archiwum/BIP dodaje dodatkowo `_BIP`, żeby od razu było widać, że to
+wersja bezpowrotna: `test_anon_BIP.pdf`.
+
 ## Style anonimizacji (funkcja 8)
 
 | Styl | Przykład | Odwracalność |
@@ -146,9 +163,13 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
 - **OCR jakości zależnej od skanu.** Niska rozdzielczość, pochylone
   strony czy odręczne pismo obniżają skuteczność. 300 DPI (domyślne w
   module) to rozsądny punkt startowy.
-- **DOCX**: podmiana zachowuje podział na akapity, nie formatowanie
-  znak-po-znaku. PDF/RTF/ODT: tylko ekstrakcja treści, bez odtwarzania
-  layoutu.
+- **Zachowanie formatu wyjściowego (`_anon`) odtwarza treść, nie layout.**
+  DOCX/ODT: podział na akapity tak, formatowanie znak-po-znaku (pogrubienia,
+  kolory, style) nie. PDF/RTF: całkiem nowy, uproszczony dokument z czystym
+  tekstem — bez kolumn, tabel, obrazów ani oryginalnej czcionki. Obrazy
+  (JPG/PNG): nowy obraz z tekstem na białym tle, nie edycja oryginalnego
+  zdjęcia. To świadomy kompromis — priorytetem jest zniknięcie danych
+  wrażliwych z treści, nie wizualna wierność oryginałowi.
 - **Styl `puste` jest odwracalny wyłącznie do celów raportu/audytu** —
   nie da się z niego automatycznie przywrócić tekstu (to zamierzone).
 - **Auto-deanonimizacja trzyma mapowanie w pamięci serwera** przez czas
@@ -158,8 +179,8 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
   wielojęzycznej, nie kompletna baza danych. Łatwo rozszerzyć,
   podmieniając pliki w `dane_slownikowe/`.
 - **To nie jest gotowy "plug-and-play" produkt komercyjny** — architektura
-  i pipeline end-to-end są solidne i przetestowane (18 testów
-  jednostkowych), ale przed użyciem produkcyjnym z danymi rzeczywistymi
+  i pipeline end-to-end są solidne i przetestowane (22 testy jednostkowe),
+  ale przed użyciem produkcyjnym z danymi rzeczywistymi
   klientów warto dostroić słowniki/progi na Waszych dokumentach.
 
 ## Struktura projektu
@@ -177,12 +198,13 @@ anonimizator/
 │   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP
 │   ├── deanonimizator.py         przywracanie oryginału
 │   ├── raport.py                 raport PDF zabezpieczony hasłem
+│   ├── czcionki_pdf.py           wspólna rejestracja czcionki DejaVu (PDF)
 │   └── czcionki/                 czcionka DejaVu (polskie znaki w PDF)
 ├── app.py                        aplikacja webowa (drag&drop, wszystkie funkcje)
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        18 testów jednostkowych
+└── tests/                        22 testy jednostkowe
 ```
 
 ## Sugerowane następne kroki
@@ -195,12 +217,3 @@ anonimizator/
    OCR na rzeczywistych dokumentach firmowych bywa różna.
 4. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
    sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.
-
-## Licencja
-
-Kod projektu: licencja MIT (patrz plik `LICENSE`).
-
-Dołączona czcionka `anonimizator/czcionki/DejaVuSans*.ttf` (używana do
-generowania polskich znaków w raporcie PDF) objęta jest własną, permisywną
-licencją Bitstream Vera / DejaVu Fonts License, pozwalającą na swobodną
-redystrybucję — szczegóły: https://dejavu-fonts.github.io/License.html

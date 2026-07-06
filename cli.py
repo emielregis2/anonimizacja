@@ -24,7 +24,7 @@ Przykłady:
   python cli.py anonimizuj dokument.docx --haslo "..." --wszystko --jezyki pl,fr,sk
 
   # Przywrócenie oryginału:
-  python cli.py deanonimizuj dokument_zanonimizowany.txt dokument_mapowanie.enc \\
+  python cli.py deanonimizuj dokument_anon.pdf dokument_mapowanie.enc \\
       --haslo "MojeHaslo123!"
 """
 
@@ -182,8 +182,11 @@ def cmd_deanonimizuj(args):
             sys.exit(1)
 
     haslo = args.haslo or getpass.getpass("Podaj hasło szyfrujące mapowanie: ")
-    sciezka_wyjsciowa = Path(args.wyjscie) if args.wyjscie else \
-        sciezka_tekst.with_name(sciezka_tekst.stem.replace("_zanonimizowany", "") + "_oryginal.txt")
+    if args.wyjscie:
+        sciezka_wyjsciowa = Path(args.wyjscie)
+    else:
+        nazwa_bazowa = sciezka_tekst.stem.replace("_anon_BIP", "").replace("_anon", "")
+        sciezka_wyjsciowa = sciezka_tekst.with_name(f"{nazwa_bazowa}_oryginal{sciezka_tekst.suffix}")
 
     try:
         deanonimizuj_plik(sciezka_tekst, sciezka_mapowanie, haslo, sciezka_wyjsciowa)

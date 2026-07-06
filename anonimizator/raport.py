@@ -16,30 +16,15 @@ from pathlib import Path
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from pypdf import PdfReader, PdfWriter
 
-_KATALOG_CZCIONEK = Path(__file__).parent / "czcionki"
-_CZCIONKI_ZAREJESTROWANE = False
-
-
-def _zarejestruj_czcionki_pl():
-    """Domyślne czcionki bazowe reportlab (Helvetica) nie mają polskich
-    znaków diakrytycznych — rejestrujemy DejaVu Sans (dołączoną do projektu,
-    więc działa niezależnie od systemu i czcionek zainstalowanych u klienta)."""
-    global _CZCIONKI_ZAREJESTROWANE
-    if _CZCIONKI_ZAREJESTROWANE:
-        return
-    pdfmetrics.registerFont(TTFont("DejaVuSans", str(_KATALOG_CZCIONEK / "DejaVuSans.ttf")))
-    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(_KATALOG_CZCIONEK / "DejaVuSans-Bold.ttf")))
-    _CZCIONKI_ZAREJESTROWANE = True
+from .czcionki_pdf import zarejestruj_czcionki_pl
 
 
 def _zbuduj_pdf_niezaszyfrowany(mapowanie: dict[str, str], nazwa_dokumentu: str) -> bytes:
-    _zarejestruj_czcionki_pl()
+    zarejestruj_czcionki_pl()
     bufor = BytesIO()
     dokument = SimpleDocTemplate(
         bufor, pagesize=A4,

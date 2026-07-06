@@ -278,10 +278,11 @@ def anonimizuj_plik(
     )
 
     nazwa_bazowa = sciezka_wejsciowa.stem
-    sciezka_tekst = katalog_wyjsciowy / f"{nazwa_bazowa}_zanonimizowany.txt"
+    rozszerzenie = sciezka_wejsciowa.suffix
+    sciezka_tekst = katalog_wyjsciowy / f"{nazwa_bazowa}_anon{rozszerzenie}"
     sciezka_mapowanie = katalog_wyjsciowy / f"{nazwa_bazowa}_mapowanie.enc"
 
-    extractors.zapisz_tekst(sciezka_tekst, wynik.tekst_zanonimizowany)
+    extractors.zapisz_w_formacie(sciezka_tekst, wynik.tekst_zanonimizowany)
     zaszyfrowane = crypto.zaszyfruj_mapowanie(wynik.mapowanie, haslo)
     sciezka_mapowanie.write_bytes(zaszyfrowane)
 
@@ -339,8 +340,8 @@ def anonimizuj_wiele_plikow(
             tekst = _usun_numery_stron(tekst)
         tekst_wynikowy = silnik.przetworz(tekst, kategorie=kategorie, tryb_ai=tryb_ai)
 
-        sciezka_tekst = katalog_wyjsciowy / f"{sciezka.stem}_zanonimizowany.txt"
-        extractors.zapisz_tekst(sciezka_tekst, tekst_wynikowy)
+        sciezka_tekst = katalog_wyjsciowy / f"{sciezka.stem}_anon{sciezka.suffix}"
+        extractors.zapisz_w_formacie(sciezka_tekst, tekst_wynikowy)
         sciezki_tekst[sciezka.name] = sciezka_tekst
 
     sciezka_mapowanie = katalog_wyjsciowy / "sprawa_mapowanie.enc"
@@ -387,6 +388,6 @@ def anonimizuj_bip(
     # wynik.mapowanie świadomie NIE jest zapisywane na dysk — to jest cały
     # sens trybu Archiwum/BIP (bezpowrotność, brak klucza do odzyskania).
 
-    sciezka_tekst = katalog_wyjsciowy / f"{sciezka_wejsciowa.stem}_BIP.txt"
-    extractors.zapisz_tekst(sciezka_tekst, wynik.tekst_zanonimizowany)
+    sciezka_tekst = katalog_wyjsciowy / f"{sciezka_wejsciowa.stem}_anon_BIP{sciezka_wejsciowa.suffix}"
+    extractors.zapisz_w_formacie(sciezka_tekst, wynik.tekst_zanonimizowany)
     return sciezka_tekst

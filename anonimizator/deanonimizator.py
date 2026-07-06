@@ -11,7 +11,7 @@ służy wyłącznie do raportu/audytu, nie do automatycznego przywracania.
 
 from __future__ import annotations
 from pathlib import Path
-from . import crypto
+from . import crypto, extractors
 
 
 class NieodwracalnyStylMaskowania(Exception):
@@ -44,9 +44,13 @@ def deanonimizuj_plik(
     haslo: str,
     sciezka_wyjsciowa: Path,
 ) -> Path:
-    tekst = sciezka_tekst.read_text(encoding="utf-8")
+    """Odczytuje zanonimizowany plik NIEZALEŻNIE OD JEGO FORMATU (od wersji
+    z zapisem w oryginalnym formacie, zanonimizowany plik może być np. .pdf
+    albo .docx, nie tylko .txt) i zapisuje przywrócony oryginał w formacie
+    zgodnym z rozszerzeniem sciezka_wyjsciowa."""
+    tekst = extractors.wczytaj_tekst(sciezka_tekst)
     zaszyfrowane = sciezka_mapowanie.read_bytes()
     mapowanie = crypto.odszyfruj_mapowanie(zaszyfrowane, haslo)
     oryginal = deanonimizuj_tekst(tekst, mapowanie)
-    sciezka_wyjsciowa.write_text(oryginal, encoding="utf-8")
+    extractors.zapisz_w_formacie(sciezka_wyjsciowa, oryginal)
     return sciezka_wyjsciowa

@@ -136,17 +136,137 @@ def _wczytaj_pdf(sciezka: Path, uzyj_ocr: bool = True) -> str:
 
 
 def zapisz_tekst(sciezka: Path, tresc: str) -> None:
-    """Zapisuje wynik anonimizacji zawsze jako .txt (patrz uwaga w docstringu
-    modułu — pełne odtworzenie oryginalnego formatu to osobne zadanie)."""
+    """Zapisuje treść jako zwykły plik .txt."""
     sciezka.write_text(tresc, encoding="utf-8")
 
 
 def zapisz_docx(sciezka: Path, tresc: str) -> None:
-    """Wariant zachowujący format .docx: jeden akapit wyjściowy na jedną
-    linię tekstu wejściowego (formatowanie znakowe oryginału nie jest
-    odtwarzane — patrz ograniczenie w docstringu modułu)."""
+    """Zapisuje treść jako .docx: jeden akapit wyjściowy na jedną linię
+    tekstu wejściowego (formatowanie znakowe oryginału nie jest odtwarzane —
+    patrz ograniczenie w docstringu modułu)."""
     import docx
     dokument = docx.Document()
     for linia in tresc.split("\n"):
         dokument.add_paragraph(linia)
     dokument.save(str(sciezka))
+
+
+def _zapisz_odt(sciezka: Path, tresc: str) -> None:
+    from odf.opendocument import OpenDocumentText
+    from odf.text import P
+
+    dokument = OpenDocumentText()
+    for linia in tresc.split("\n"):
+        dokument.text.addElement(P(text=linia))
+    dokument.save(str(sciezka))
+
+
+def _escape_rtf(tekst: str) -> str:
+    """Ucieczka znaków specjalnych RTF; znaki spoza ASCII kodowane jako
+    \\uNNNN z bezpiecznym znakiem zapasowym — działa niezależnie od strony
+    kodowej czytnika, więc polskie znaki wyświetlą się poprawnie."""
+    wynik = []
+    for znak in tekst:
+        if znak in ("\\", "{", "}"):
+            wynik.append("\\" + znak)
+        elif ord(znak) > 127:
+            wynik.append(f"\\u{ord(znak)}?")
+        else:
+            wynik.append(znak)
+    return "".join(wynik)
+
+
+def _zapisz_rtf(sciezka: Path, tresc: str) -> None:
+    linie = tresc.split("\n")
+    tresc_rtf = "\\par\n".join(_escape_rtf(linia) for linia in linie)
+    dokument = (
+        "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\f0\\fs22 "
+        + tresc_rtf + "}"
+    )
+    sciezka.write_text(dokument, encoding="utf-8")
+
+
+def _zapisz_pdf(sciezka: Path, tresc: str) -> None:
+    import html
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from .czcionki_pdf import zarejestruj_czcionki_pl
+
+    zarejestruj_czcionki_pl()
+    dokument = SimpleDocTemplate(
+        str(sciezka), pagesize=A4,
+        leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm, bottomMargin=20 * mm,
+    )
+    styl = getSampleStyleSheet()["Normal"]
+    styl.fontName = "DejaVuSans"
+    styl.fontSize = 11
+    styl.leading = 15
+
+    elementy = []
+    for linia in tresc.split("\n"):
+        if linia.strip():
+            elementy.append(Paragraph(html.escape(linia), styl))
+        else:
+            elementy.append(Spacer(1, 8))
+    dokument.build(elementy or [Paragraph("", styl)])
+
+
+def _zapisz_obraz(sciezka: Path, tresc: str) -> None:
+    """Renderuje zanonimizowaną treść jako nowy obraz — dla plików wejściowych
+    JPG/PNG (skanów przetworzonych przez OCR), zamiast zwracać sam plik .txt.
+    Layout oryginalnego obrazu nie jest odtwarzany, tylko czysty tekst na
+    białym tle — patrz ograniczenie w docstringu modułu."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    czcionka_sciezka = Path(__file__).parent / "czcionki" / "DejaVuSans.ttf"
+    rozmiar_czcionki = 22
+    try:
+        font = ImageFont.truetype(str(czcionka_sciezka), rozmiar_czcionki)
+    except Exception:
+        font = ImageFont.load_default()
+
+    linie = tresc.split("\n") or [""]
+    tymczasowy = Image.new("RGB", (10, 10))
+    rysownik_tymczasowy = ImageDraw.Draw(tymczasowy)
+    szerokosci = [rysownik_tymczasowy.textlength(l, font=font) for l in linie] or [0]
+
+    szerokosc_linii_tekstu = int(max(szerokosci, default=0))
+    wysokosc_linii = rozmiar_czcionki + 10
+    szerokosc = max(szerokosc_linii_tekstu + 40, 400)
+    wysokosc = max(wysokosc_linii * len(linie) + 40, 100)
+
+    obraz = Image.new("RGB", (szerokosc, wysokosc), color="white")
+    rysownik = ImageDraw.Draw(obraz)
+    y = 20
+    for linia in linie:
+        rysownik.text((20, y), linia, fill="black", font=font)
+        y += wysokosc_linii
+
+    format_obrazu = "JPEG" if sciezka.suffix.lower() in (".jpg", ".jpeg") else "PNG"
+    obraz.save(str(sciezka), format=format_obrazu)
+
+
+def zapisz_w_formacie(sciezka_wyjsciowa: Path, tresc: str) -> None:
+    """Zapisuje treść w formacie zgodnym z rozszerzeniem sciezka_wyjsciowa —
+    czyli w tym samym formacie co plik źródłowy (patrz anonimizator.py, które
+    dobiera rozszerzenie pliku wyjściowego na podstawie pliku wejściowego)."""
+    rozszerzenie = sciezka_wyjsciowa.suffix.lower()
+    if rozszerzenie == ".txt":
+        zapisz_tekst(sciezka_wyjsciowa, tresc)
+    elif rozszerzenie == ".docx":
+        zapisz_docx(sciezka_wyjsciowa, tresc)
+    elif rozszerzenie == ".odt":
+        _zapisz_odt(sciezka_wyjsciowa, tresc)
+    elif rozszerzenie == ".rtf":
+        _zapisz_rtf(sciezka_wyjsciowa, tresc)
+    elif rozszerzenie == ".pdf":
+        _zapisz_pdf(sciezka_wyjsciowa, tresc)
+    elif rozszerzenie in (".jpg", ".jpeg", ".png"):
+        _zapisz_obraz(sciezka_wyjsciowa, tresc)
+    else:
+        raise ValueError(
+            f"Nieobsługiwany format zapisu: {rozszerzenie}. "
+            f"Obsługiwane: {sorted(FORMATY_WSPIERANE)}"
+        )

@@ -97,11 +97,13 @@ def test_tryb_bip_nie_zapisuje_zadnego_mapowania(tmp_path):
 
 def test_ocr_obrazu_wykrywa_dane(tmp_path):
     from PIL import Image, ImageDraw, ImageFont
+    # Czcionka dolaczona do projektu (nie sciezka systemowa) - dzieki temu
+    # test dziala identycznie na Linuksie i Windows.
+    czcionka_projektu = Path(__file__).parent.parent / "anonimizator" / "czcionki" / "DejaVuSans-Bold.ttf"
     img = Image.new("RGB", (1200, 120), color="white")
     d = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+        font = ImageFont.truetype(str(czcionka_projektu), 48)
     except Exception:
         font = ImageFont.load_default()
     d.text((20, 30), "Kontakt: test@przyklad.pl", fill="black", font=font)
@@ -111,7 +113,12 @@ def test_ocr_obrazu_wykrywa_dane(tmp_path):
     wynik = anonimizuj_plik(
         sciezka_obrazu, tmp_path / "wynik", "Haslo123!", kategorie=["email"]
     )
-    tekst_wynikowy = wynik["tekst"].read_text()
+    # Wynik dla pliku wejściowego .png jest zapisywany w tym samym formacie
+    # (nowy obraz z narysowanym zanonimizowanym tekstem), więc odczytujemy go
+    # z powrotem przez OCR, zamiast czytać jako zwykły plik tekstowy.
+    assert wynik["tekst"].suffix == ".png"
+    from anonimizator.extractors import wczytaj_tekst
+    tekst_wynikowy = wczytaj_tekst(wynik["tekst"])
     assert "[EMAIL_1]" in tekst_wynikowy
     assert "test@przyklad.pl" not in tekst_wynikowy
 
@@ -145,3 +152,58 @@ def test_bez_pakietu_jezykowego_obce_imiona_niewykryte():
     tekst = "Spotkanie z James Smith."
     wynik = anonimizuj_tekst(tekst, kategorie=["imiona_nazwiska"], jezyki=["pl"])
     assert "James" in wynik.tekst_zanonimizowany  # brak pakietu UK -> nie wykryto
+
+
+def test_nazwa_pliku_wynikowego_ma_przyrostek_anon_i_oryginalne_rozszerzenie(tmp_path):
+    p = tmp_path / "umowa.txt"
+    p.write_text("Jan Kowalski podpisal umowe.")
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst"].name == "umowa_anon.txt"
+
+
+def test_wynik_docx_zachowuje_format_docx(tmp_path):
+    import docx
+    sciezka_docx = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    dokument.add_paragraph("Sprawa dotyczy Jan Kowalski.")
+    dokument.save(str(sciezka_docx))
+
+    wynik = anonimizuj_plik(sciezka_docx, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst"].name == "pismo_anon.docx"
+    assert wynik["tekst"].suffix == ".docx"
+
+    from anonimizator.extractors import wczytaj_tekst
+    tresc = wczytaj_tekst(wynik["tekst"])
+    assert "[OSOBA_1]" in tresc
+    assert "Jan Kowalski" not in tresc
+
+
+def test_wynik_pdf_zachowuje_format_pdf(tmp_path):
+    from reportlab.pdfgen import canvas
+    sciezka_pdf = tmp_path / "faktura.pdf"
+    c = canvas.Canvas(str(sciezka_pdf))
+    c.drawString(50, 750, "Odbiorca: Jan Kowalski")
+    c.save()
+
+    wynik = anonimizuj_plik(sciezka_pdf, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst"].name == "faktura_anon.pdf"
+
+    from anonimizator.extractors import wczytaj_tekst
+    tresc = wczytaj_tekst(wynik["tekst"])
+    assert "[OSOBA_1]" in tresc
+    assert "Jan Kowalski" not in tresc
+
+
+def test_deanonimizacja_plikow_roznych_formatow_dziala(tmp_path):
+    from anonimizator import deanonimizuj_plik
+    p = tmp_path / "notatka.rtf"
+    # Minimalny poprawny plik RTF
+    p.write_text(r"{\rtf1\ansi Sprawa Jan Kowalski.}", encoding="utf-8")
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst"].suffix == ".rtf"
+
+    sciezka_wyjsciowa = tmp_path / "przywrocony.txt"
+    deanonimizuj_plik(wynik["tekst"], wynik["mapowanie"], "Haslo123!", sciezka_wyjsciowa)
+    tresc = sciezka_wyjsciowa.read_text()
+    assert "Jan Kowalski" in tresc
