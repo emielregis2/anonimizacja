@@ -91,6 +91,35 @@ STYLE_MASKOWANIA = ("pelny_token", "etykieta", "inicjaly", "puste")
 
 WZORZEC_TOKENU = re.compile(r"\[[A-ZĄĆĘŁŃÓŚŹŻ_]+_\d+\]")
 
+# Znacznik kończący automatycznie dołączany prompt dla AI (patrz zbuduj_prompt_ai
+# poniżej). Jest jednocześnie czytelny dla człowieka (wygląda jak naturalne
+# zdanie zamykające instrukcję) i wystarczająco charakterystyczny, by
+# deanonimizator.py mógł po nim rozpoznać i usunąć cały blok promptu przed
+# przywróceniem oryginalnej treści — tak, by odtworzony dokument nie zawierał
+# już tego dopisku.
+GRANICA_PROMPTU_AI = "[--- KONIEC PROMPTU DLA AI — PONIŻEJ WŁAŚCIWA TREŚĆ DOKUMENTU ---]"
+
+
+def zbuduj_prompt_ai(mapowanie: dict[str, str]) -> str:
+    """Buduje prompt instruujący model AI, by zachował placeholdery dokładnie
+    tak, jak występują w konkretnym dokumencie — niezależnie od wybranego
+    stylu maskowania (pełny token, etykieta czy inicjały). Lista placeholderów
+    pochodzi z faktycznego mapowania, więc zawsze pasuje do treści, zamiast
+    zakładać jeden sztywny format (np. tylko nawiasy kwadratowe)."""
+    if not mapowanie:
+        return ""
+    tokeny = sorted(mapowanie.keys())
+    lista = ", ".join(tokeny)
+    return (
+        "Poniższy tekst został zanonimizowany. Pracując z nim, zachowaj dokładnie "
+        "poniższe oznaczenia zastępcze — nie zmieniaj ich pisowni ani formy, nie "
+        "zamieniaj ich na opisy typu „powódka”, „klient”, „strona” ani na inicjały, "
+        "i nie wymyślaj nowych oznaczeń. Każde z poniższych oznaczeń w całym "
+        "dokumencie odnosi się zawsze do tego samego, konkretnego podmiotu:\n\n"
+        f"{lista}\n\n"
+        f"{GRANICA_PROMPTU_AI}\n\n"
+    )
+
 
 def _numer_do_liter(n: int) -> str:
     """1 -> A, 2 -> B, ..., 26 -> Z, 27 -> AA, ..."""
@@ -267,8 +296,16 @@ def anonimizuj_plik(
     usun_numery_stron: bool = False,
     styl: str = "pelny_token",
     jezyki: list[str] | None = None,
+    dolacz_prompt_ai: bool = True,
 ) -> dict[str, Path]:
-    """Pełny przepływ dla pojedynczego pliku."""
+    """Pełny przepływ dla pojedynczego pliku.
+
+    dolacz_prompt_ai: gdy True (domyślnie) i mapowanie jest odwracalne
+    (styl != "puste"), na początku zapisanego pliku doklejany jest prompt
+    instruujący model AI, by zachował placeholdery bez zmian. Dzięki temu
+    plik wynikowy jest od razu samowystarczalny — przydatne przy masowym,
+    zautomatyzowanym przetwarzaniu całych serii dokumentów, bo każdy plik
+    "niesie" swój własny prompt bez ręcznego dopisywania."""
     katalog_wyjsciowy.mkdir(parents=True, exist_ok=True)
     tekst = extractors.wczytaj_tekst(sciezka_wejsciowa)
 
@@ -277,12 +314,17 @@ def anonimizuj_plik(
         usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
     )
 
+    prompt_dolaczony = ""
+    if dolacz_prompt_ai and styl != "puste" and wynik.mapowanie:
+        prompt_dolaczony = zbuduj_prompt_ai(wynik.mapowanie)
+    tekst_do_zapisu = prompt_dolaczony + wynik.tekst_zanonimizowany
+
     nazwa_bazowa = sciezka_wejsciowa.stem
     rozszerzenie = sciezka_wejsciowa.suffix
     sciezka_tekst = katalog_wyjsciowy / f"{nazwa_bazowa}_anon{rozszerzenie}"
     sciezka_mapowanie = katalog_wyjsciowy / f"{nazwa_bazowa}_mapowanie.enc"
 
-    extractors.zapisz_w_formacie(sciezka_tekst, wynik.tekst_zanonimizowany)
+    extractors.zapisz_w_formacie(sciezka_tekst, tekst_do_zapisu)
     zaszyfrowane = crypto.zaszyfruj_mapowanie(wynik.mapowanie, haslo)
     sciezka_mapowanie.write_bytes(zaszyfrowane)
 
@@ -291,6 +333,8 @@ def anonimizuj_plik(
         "mapowanie": sciezka_mapowanie,
         "liczba_wykryc": wynik.liczba_wykryc,
         "mapowanie_jawne": wynik.mapowanie,
+        "tekst_zanonimizowany": tekst_do_zapisu,
+        "prompt_ai": prompt_dolaczony,
     }
 
 
@@ -304,6 +348,7 @@ def anonimizuj_wiele_plikow(
     usun_numery_stron: bool = False,
     styl: str = "pelny_token",
     jezyki: list[str] | None = None,
+    dolacz_prompt_ai: bool = True,
 ) -> dict:
     """
     Przetwarza wiele plików naraz.
@@ -313,6 +358,12 @@ def anonimizuj_wiele_plikow(
         dokumentach tej samej sprawy dostaje ten sam token wszędzie.
     tryb="niezalezne": każdy plik ma własną, niezależną numerację i własny
         plik mapowania (dokładnie jak przy pojedynczym anonimizuj_plik).
+
+    dolacz_prompt_ai: patrz anonimizuj_plik. W trybie "jedna_sprawa" każdy
+        plik dostaje prompt zawierający tylko te tokeny, które faktycznie
+        w nim występują (nie całą, wspólną listę tokenów całej sprawy) —
+        żeby prompt dołączony do konkretnego pisma miał sens w oderwaniu
+        od pozostałych dokumentów sprawy.
     """
     if tryb not in ("jedna_sprawa", "niezalezne"):
         raise ValueError('tryb musi być "jedna_sprawa" albo "niezalezne"')
@@ -326,6 +377,7 @@ def anonimizuj_wiele_plikow(
                 sciezka, katalog_wyjsciowy, haslo,
                 kategorie=kategorie, tryb_ai=tryb_ai,
                 usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
+                dolacz_prompt_ai=dolacz_prompt_ai,
             )
         return {"tryb": tryb, "pliki": wyniki_per_plik}
 
@@ -333,6 +385,7 @@ def anonimizuj_wiele_plikow(
     silnik = SilnikAnonimizacji(styl=styl)
     silnik._jezyki = tuple(jezyki or ["pl"])
     sciezki_tekst = {}
+    teksty_zanonimizowane = {}
 
     for sciezka in sciezki:
         tekst = extractors.wczytaj_tekst(sciezka)
@@ -340,9 +393,18 @@ def anonimizuj_wiele_plikow(
             tekst = _usun_numery_stron(tekst)
         tekst_wynikowy = silnik.przetworz(tekst, kategorie=kategorie, tryb_ai=tryb_ai)
 
+        tekst_do_zapisu = tekst_wynikowy
+        if dolacz_prompt_ai and styl != "puste":
+            tokeny_w_tym_pliku = {
+                k: v for k, v in silnik.mapowanie.items() if k in tekst_wynikowy
+            }
+            if tokeny_w_tym_pliku:
+                tekst_do_zapisu = zbuduj_prompt_ai(tokeny_w_tym_pliku) + tekst_wynikowy
+
         sciezka_tekst = katalog_wyjsciowy / f"{sciezka.stem}_anon{sciezka.suffix}"
-        extractors.zapisz_w_formacie(sciezka_tekst, tekst_wynikowy)
+        extractors.zapisz_w_formacie(sciezka_tekst, tekst_do_zapisu)
         sciezki_tekst[sciezka.name] = sciezka_tekst
+        teksty_zanonimizowane[sciezka.name] = tekst_do_zapisu
 
     sciezka_mapowanie = katalog_wyjsciowy / "sprawa_mapowanie.enc"
     zaszyfrowane = crypto.zaszyfruj_mapowanie(silnik.mapowanie, haslo)
@@ -354,6 +416,7 @@ def anonimizuj_wiele_plikow(
         "mapowanie": sciezka_mapowanie,
         "mapowanie_jawne": silnik.mapowanie,
         "liczba_wykryc": silnik.liczba_wykryc,
+        "teksty_zanonimizowane": teksty_zanonimizowane,
     }
 
 

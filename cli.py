@@ -100,6 +100,7 @@ def cmd_anonimizuj(args):
         kategorie=kategorie, tryb_ai=args.tryb_ai,
         usun_numery_stron=args.usun_numery_stron,
         styl=args.styl, jezyki=jezyki,
+        dolacz_prompt_ai=not args.bez_promptu_ai,
     )
 
     print(f"Zapisano: {wynik['tekst']}")
@@ -135,6 +136,7 @@ def cmd_anonimizuj_wsadowo(args):
         sciezki, Path(args.katalog_wyjsciowy), haslo, tryb=args.tryb,
         kategorie=kategorie, tryb_ai=args.tryb_ai,
         usun_numery_stron=args.usun_numery_stron, styl=args.styl, jezyki=jezyki,
+        dolacz_prompt_ai=not args.bez_promptu_ai,
     )
 
     print(f"Tryb: {wynik['tryb']}")
@@ -208,6 +210,9 @@ def _dodaj_wspolne_argumenty(parser):
     parser.add_argument("--jezyki", default=None, help="np. pl,fr,sk (domyślnie: pl)")
     parser.add_argument("--raport-pdf", action="store_true",
                          help="Dodatkowo wygeneruj czytelny raport PDF zabezpieczony tym samym hasłem")
+    parser.add_argument("--bez-promptu-ai", action="store_true",
+                         help="Nie dołączaj automatycznie promptu dla AI na początku pliku wynikowego "
+                              "(domyślnie prompt jest dołączany, żeby plik był samowystarczalny)")
 
 
 def main():

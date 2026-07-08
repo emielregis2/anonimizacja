@@ -15,6 +15,7 @@ from anonimizator import (
     deanonimizuj_tekst, deanonimizuj_plik, STYLE_MASKOWANIA,
     NieodwracalnyStylMaskowania,
 )
+from anonimizator.anonimizator import GRANICA_PROMPTU_AI, zbuduj_prompt_ai
 
 
 def test_wszystkie_style_generuja_tekst():
@@ -54,15 +55,15 @@ def test_etykieta_numeruje_literami():
 def test_tryb_wsadowy_jedna_sprawa_spojne_tokeny(tmp_path):
     p1 = tmp_path / "a.txt"
     p2 = tmp_path / "b.txt"
-    p1.write_text("Sprawa Jan Kowalski, tel. 501 234 567.")
-    p2.write_text("Ponownie: Jan Kowalski potwierdza odbiór.")
+    p1.write_text("Sprawa Jan Kowalski, tel. 501 234 567.", encoding="utf-8")
+    p2.write_text("Ponownie: Jan Kowalski potwierdza odbiór.", encoding="utf-8")
 
     wynik = anonimizuj_wiele_plikow(
         [p1, p2], tmp_path / "wynik", "Haslo123!",
         tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
     )
-    t1 = wynik["pliki_tekst"]["a.txt"].read_text()
-    t2 = wynik["pliki_tekst"]["b.txt"].read_text()
+    t1 = wynik["pliki_tekst"]["a.txt"].read_text(encoding="utf-8")
+    t2 = wynik["pliki_tekst"]["b.txt"].read_text(encoding="utf-8")
     # ten sam token dla tej samej osoby w obu plikach
     assert "[OSOBA_1]" in t1 and "[OSOBA_1]" in t2
 
@@ -87,7 +88,7 @@ def test_tryb_bip_nie_zapisuje_zadnego_mapowania(tmp_path):
 
     sciezka_wyn = anonimizuj_bip(p1, tmp_path / "wynik_bip", kategorie=["imiona_nazwiska", "pesel"])
     assert sciezka_wyn.exists()
-    assert "Jan Kowalski" not in sciezka_wyn.read_text()
+    assert "Jan Kowalski" not in sciezka_wyn.read_text(encoding="utf-8")
 
     pliki_w_katalogu = list((tmp_path / "wynik_bip").iterdir())
     nazwy = [p.name for p in pliki_w_katalogu]
@@ -205,5 +206,76 @@ def test_deanonimizacja_plikow_roznych_formatow_dziala(tmp_path):
 
     sciezka_wyjsciowa = tmp_path / "przywrocony.txt"
     deanonimizuj_plik(wynik["tekst"], wynik["mapowanie"], "Haslo123!", sciezka_wyjsciowa)
-    tresc = sciezka_wyjsciowa.read_text()
+    tresc = sciezka_wyjsciowa.read_text(encoding="utf-8")
     assert "Jan Kowalski" in tresc
+
+
+def test_prompt_ai_domyslnie_dolaczony_i_zawiera_tokeny(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("Jan Kowalski, NIP: 526-000-12-46.", encoding="utf-8")
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!",
+                             kategorie=["imiona_nazwiska", "nip"])
+    tresc_pliku = wynik["tekst"].read_text(encoding="utf-8")
+
+    assert GRANICA_PROMPTU_AI in tresc_pliku
+    assert "[OSOBA_1]" in wynik["prompt_ai"]
+    assert "[NIP_1]" in wynik["prompt_ai"]
+    # prompt musi poprzedzać właściwą treść w zapisanym pliku
+    assert tresc_pliku.index(GRANICA_PROMPTU_AI) < tresc_pliku.index("[OSOBA_1]", tresc_pliku.index(GRANICA_PROMPTU_AI) + 1)
+
+
+def test_prompt_ai_mozna_wylaczyc(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("Jan Kowalski.", encoding="utf-8")
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!",
+                             kategorie=["imiona_nazwiska"], dolacz_prompt_ai=False)
+    tresc_pliku = wynik["tekst"].read_text(encoding="utf-8")
+    assert GRANICA_PROMPTU_AI not in tresc_pliku
+    assert wynik["prompt_ai"] == ""
+
+
+def test_prompt_ai_nieobecny_w_trybie_bip(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("Jan Kowalski.", encoding="utf-8")
+
+    sciezka_wyn = anonimizuj_bip(p, tmp_path / "wynik_bip", kategorie=["imiona_nazwiska"])
+    assert GRANICA_PROMPTU_AI not in sciezka_wyn.read_text(encoding="utf-8")
+
+
+def test_prompt_ai_usuwany_przy_deanonimizacji(tmp_path):
+    p = tmp_path / "a.txt"
+    tekst_oryginalny = "Jan Kowalski dzwonił w sprawie umowy."
+    p.write_text(tekst_oryginalny, encoding="utf-8")
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert GRANICA_PROMPTU_AI in wynik["tekst"].read_text(encoding="utf-8")
+
+    sciezka_wyjsciowa = tmp_path / "przywrocony.txt"
+    deanonimizuj_plik(wynik["tekst"], wynik["mapowanie"], "Haslo123!", sciezka_wyjsciowa)
+    tresc = sciezka_wyjsciowa.read_text(encoding="utf-8")
+
+    assert GRANICA_PROMPTU_AI not in tresc
+    assert tresc == tekst_oryginalny
+
+
+def test_prompt_ai_w_trybie_jedna_sprawa_zawiera_tylko_tokeny_z_danego_pliku(tmp_path):
+    p1 = tmp_path / "a.txt"
+    p2 = tmp_path / "b.txt"
+    p1.write_text("Jan Kowalski.", encoding="utf-8")
+    # Celowo ta sama, nieodmieniona forma "Jan Kowalski" — silnik dopasowuje
+    # po dokładnym tekście, bez analizy fleksyjnej języka polskiego.
+    p2.write_text("Anna Nowak i Jan Kowalski byli na spotkaniu.", encoding="utf-8")
+
+    wynik = anonimizuj_wiele_plikow(
+        [p1, p2], tmp_path / "wynik", "Haslo123!",
+        tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
+    )
+    t1 = wynik["pliki_tekst"]["a.txt"].read_text(encoding="utf-8")
+    t2 = wynik["pliki_tekst"]["b.txt"].read_text(encoding="utf-8")
+
+    # plik a.txt wspomina tylko Jana Kowalskiego -> tylko OSOBA_1 w jego promptcie
+    assert "[OSOBA_1]" in t1
+    # plik b.txt wspomina obie osoby -> oba tokeny w jego promptcie
+    assert "[OSOBA_1]" in t2 and "[OSOBA_2]" in t2

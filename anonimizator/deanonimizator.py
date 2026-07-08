@@ -12,6 +12,7 @@ służy wyłącznie do raportu/audytu, nie do automatycznego przywracania.
 from __future__ import annotations
 from pathlib import Path
 from . import crypto, extractors
+from .anonimizator import GRANICA_PROMPTU_AI
 
 
 class NieodwracalnyStylMaskowania(Exception):
@@ -29,6 +30,13 @@ def deanonimizuj_tekst(tekst_zanonimizowany: str, mapowanie: dict[str, str]) -> 
             "usunięte, bez możliwości odtworzenia). Mapowanie zawiera dane "
             "wyłącznie do celów raportu/audytu."
         )
+
+    # Jeśli plik ma automatycznie dołączony prompt dla AI (patrz
+    # anonimizator.zbuduj_prompt_ai), usuwamy go przed przywróceniem —
+    # inaczej odtworzony "oryginał" zawierałby dopisek, którego w prawdziwym
+    # oryginale nigdy nie było.
+    if GRANICA_PROMPTU_AI in tekst_zanonimizowany:
+        tekst_zanonimizowany = tekst_zanonimizowany.split(GRANICA_PROMPTU_AI, 1)[1].lstrip("\n")
 
     # Podmiana najdłuższych placeholderów najpierw — zapobiega częściowym
     # kolizjom (np. "Osoba A" vs "Osoba AA").
