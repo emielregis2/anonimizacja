@@ -337,11 +337,15 @@ def anonimizuj_plik(
     zautomatyzowanym przetwarzaniu całych serii dokumentów, bo każdy plik
     "niesie" swój własny prompt bez ręcznego dopisywania.
 
-    zachowaj_layout: gdy True (domyślnie) i format wejściowy to DOCX,
-    dokument jest edytowany w miejscu (formatowanie, tabele, obrazy,
-    nagłówki/stopki zachowane) zamiast budowany od nowa z gołego tekstu.
-    Ustaw False, by wymusić stary tryb "wyciągnij tekst -> zbuduj nowy
-    dokument" (np. do porównania albo jeśli plik sprawia problemy)."""
+    zachowaj_layout: gdy True (domyślnie) i format wejściowy to DOCX lub
+    PDF, dokument jest edytowany w miejscu (formatowanie, tabele, obrazy,
+    nagłówki/stopki dla DOCX; kolumny, tabele, obrazy, czcionki dla PDF —
+    prawdziwa redakcja przez PyMuPDF, nie tylko wizualne zasłonięcie)
+    zamiast budowany od nowa z gołego tekstu. Ustaw False, by wymusić
+    stary tryb "wyciągnij tekst -> zbuduj nowy dokument" (np. do
+    porównania albo jeśli plik sprawia problemy). Dla PDF: strony bez
+    warstwy tekstowej (czyste skany) nie są tą ścieżką redagowane —
+    sprawdź pole "strony_bez_warstwy_tekstowej" w zwróconym słowniku."""
     katalog_wyjsciowy.mkdir(parents=True, exist_ok=True)
     nazwa_bazowa = sciezka_wejsciowa.stem
     rozszerzenie = sciezka_wejsciowa.suffix
@@ -374,6 +378,37 @@ def anonimizuj_plik(
             "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
             "prompt_ai": prompt_dolaczony,
         }
+
+    if zachowaj_layout and rozszerzenie.lower() == ".pdf":
+        from . import layout_pdf
+        silnik = SilnikAnonimizacji(styl=styl)
+        silnik._jezyki = tuple(jezyki or ["pl"])
+        strony_bez_tekstu = layout_pdf.anonimizuj_pdf_zachowaj_layout(
+            sciezka_wejsciowa, sciezka_tekst, silnik,
+            kategorie=kategorie, tryb_ai=tryb_ai,
+            usun_numery_stron=usun_numery_stron,
+        )
+        prompt_dolaczony = ""
+        if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
+            prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
+            layout_pdf.wstaw_prompt_do_pdf(sciezka_tekst, prompt_dolaczony)
+        zaszyfrowane = crypto.zaszyfruj_mapowanie(silnik.mapowanie, haslo)
+        sciezka_mapowanie.write_bytes(zaszyfrowane)
+        wynik_slownik = {
+            "tekst": sciezka_tekst,
+            "mapowanie": sciezka_mapowanie,
+            "liczba_wykryc": silnik.liczba_wykryc,
+            "mapowanie_jawne": silnik.mapowanie,
+            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "prompt_ai": prompt_dolaczony,
+        }
+        if strony_bez_tekstu:
+            # Strony bez warstwy tekstowej (skany) NIE zostały zredagowane
+            # tą ścieżką — patrz ograniczenie w layout_pdf.py. Zwracamy tę
+            # informację, żeby dało się ją pokazać użytkownikowi zamiast
+            # milcząco zwrócić dokument z niezredagowanymi stronami.
+            wynik_slownik["strony_bez_warstwy_tekstowej"] = strony_bez_tekstu
+        return wynik_slownik
 
     tekst = extractors.wczytaj_tekst(sciezka_wejsciowa)
 

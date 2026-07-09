@@ -527,6 +527,12 @@ async function anonimizuj() {
 
   let html = '<strong>Gotowe.</strong> Wykryte kategorie:<br>';
   for (const [k, v] of Object.entries(json.liczba_wykryc || {})) html += `&nbsp;&nbsp;${k}: ${v}<br>`;
+  if (json.strony_bez_warstwy_tekstowej && json.strony_bez_warstwy_tekstowej.length) {
+    const numery = json.strony_bez_warstwy_tekstowej.map(n => n + 1).join(', ');
+    html += `<div class="uwaga blad"><strong>Uwaga:</strong> strona(y) ${numery} PDF nie mają ` +
+      'warstwy tekstowej (wyglądają na skan) i NIE zostały zredagowane tą ścieżką — sprawdź je ' +
+      'ręcznie albo przetwórz plik ponownie.</div>';
+  }
   if (trybDysk && json.zapisano && json.zapisano.length) {
     html += '<br><strong>Zapisano obok źródła:</strong><br>';
     json.zapisano.forEach(p => { html += `&nbsp;&nbsp;${p}<br>`; });
@@ -658,6 +664,7 @@ def anonimizuj():
             mapowanie_jawne = {}
             liczba_wykryc = {}
             tekst_zanon_pojedynczy = None
+            strony_bez_tekstu = None
             prompt_pojedynczy = ""
             prompt_przyklad_wsad = ""
 
@@ -709,6 +716,7 @@ def anonimizuj():
                 pliki_do_pobrania += [wynik["tekst"], wynik["mapowanie"]]
                 tekst_zanon_pojedynczy = wynik.get("tekst_zanonimizowany")
                 prompt_pojedynczy = wynik.get("prompt_ai", "")
+                strony_bez_tekstu = wynik.get("strony_bez_warstwy_tekstowej")
 
             if chce_raport and not tryb_bip and mapowanie_jawne:
                 sciezka_raport = katalog_wyjsciowy / "raport.pdf"
@@ -740,6 +748,7 @@ def anonimizuj():
             "prompt_ai": prompt_ai,
             "prompt_wielu_plikow": prompt_wielu_plikow,
             "tekst_do_kopiowania": tekst_do_kopiowania,
+            "strony_bez_warstwy_tekstowej": strony_bez_tekstu,
         })
     except NieodwracalnyStylMaskowania as e:
         return jsonify({"blad": str(e)}), 400

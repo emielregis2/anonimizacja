@@ -471,3 +471,68 @@ def test_docx_zachowaj_layout_false_uzywa_starej_sciezki(tmp_path):
     # w starym trybie kazdy akapit budowany od nowa, wiec formatowanie
     # (pogrubienie) nie jest zachowane
     assert sprawdz.paragraphs[0].runs[0].bold is not True
+
+
+def test_pdf_redakcja_naprawde_usuwa_tekst_nie_tylko_zaslania(tmp_path):
+    """Kluczowa różnica względem zwykłego "zamalowania": PyMuPDF usuwa
+    tekst z warstwy tekstowej PDF, więc oryginalnej wartości nie da się
+    odzyskać przez zaznaczenie/kopiowanie ani przez ponowną ekstrakcję —
+    sprawdzamy to bezpośrednio przez fitz, nie przez wysokopoziomowy
+    wczytaj_tekst()."""
+    import fitz
+    from reportlab.pdfgen import canvas
+    p = tmp_path / "pismo.pdf"
+    c = canvas.Canvas(str(p))
+    c.drawString(50, 750, "Klient: Kowalski, ulica testowa 5.")
+    c.save()
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"],
+                             dolacz_prompt_ai=False)
+
+    dokument = fitz.open(str(wynik["tekst"]))
+    tekst_strony = dokument[0].get_text()
+    dokument.close()
+    assert "Kowalski" not in tekst_strony
+    assert "[OSOBA_1]" in tekst_strony
+    # reszta tekstu na stronie (poza redagowaną wartością) zostaje
+    assert "Klient:" in tekst_strony
+    assert "ulica testowa 5" in tekst_strony
+
+
+def test_pdf_layout_deanonimizacja_przywraca_oryginal(tmp_path):
+    from reportlab.pdfgen import canvas
+    from anonimizator import deanonimizuj_plik
+    from anonimizator.anonimizator import GRANICA_PROMPTU_AI
+    p = tmp_path / "pismo2.pdf"
+    c = canvas.Canvas(str(p))
+    c.drawString(50, 750, "Sprawa dotyczy Nowak, mieszkajacego w Bytom.")
+    c.save()
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!",
+                             kategorie=["imiona_nazwiska", "miasta"])
+    assert GRANICA_PROMPTU_AI in wynik["tekst_zanonimizowany"]
+
+    sciezka_wyjsciowa = tmp_path / "przywrocony.txt"
+    deanonimizuj_plik(wynik["tekst"], wynik["mapowanie"], "Haslo123!", sciezka_wyjsciowa)
+    przywrocony = sciezka_wyjsciowa.read_text(encoding="utf-8")
+    assert "Nowak" in przywrocony
+    assert "Bytom" in przywrocony
+    assert GRANICA_PROMPTU_AI not in przywrocony
+
+
+def test_pdf_strona_bez_warstwy_tekstowej_zgloszona(tmp_path):
+    """Strona będąca czystym obrazem (bez warstwy tekstowej) nie jest
+    redagowana tą ścieżką — powinna zostać zgłoszona w wyniku, żeby nie
+    zwrócić milcząco dokumentu z niezredagowaną stroną."""
+    import fitz
+    p = tmp_path / "skan.pdf"
+    dokument = fitz.open()
+    strona = dokument.new_page()
+    # pusty obraz (bialy prostokat) zamiast tekstu - strona "bez warstwy
+    # tekstowej", tak jak prawdziwy skan bez OCR
+    strona.draw_rect(fitz.Rect(0, 0, 100, 100), color=(1, 1, 1), fill=(1, 1, 1))
+    dokument.save(str(p))
+    dokument.close()
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik.get("strony_bez_warstwy_tekstowej") == [0]
