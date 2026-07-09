@@ -410,6 +410,29 @@ def anonimizuj_plik(
             wynik_slownik["strony_bez_warstwy_tekstowej"] = strony_bez_tekstu
         return wynik_slownik
 
+    if zachowaj_layout and rozszerzenie.lower() in (".jpg", ".jpeg", ".png"):
+        from . import layout_images
+        silnik = SilnikAnonimizacji(styl=styl)
+        silnik._jezyki = tuple(jezyki or ["pl"])
+        layout_images.anonimizuj_obraz_zachowaj_layout(
+            sciezka_wejsciowa, sciezka_tekst, silnik,
+            kategorie=kategorie, tryb_ai=tryb_ai,
+        )
+        prompt_dolaczony = ""
+        if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
+            prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
+            layout_images.wstaw_prompt_do_obrazu(sciezka_tekst, prompt_dolaczony)
+        zaszyfrowane = crypto.zaszyfruj_mapowanie(silnik.mapowanie, haslo)
+        sciezka_mapowanie.write_bytes(zaszyfrowane)
+        return {
+            "tekst": sciezka_tekst,
+            "mapowanie": sciezka_mapowanie,
+            "liczba_wykryc": silnik.liczba_wykryc,
+            "mapowanie_jawne": silnik.mapowanie,
+            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "prompt_ai": prompt_dolaczony,
+        }
+
     tekst = extractors.wczytaj_tekst(sciezka_wejsciowa)
 
     wynik = anonimizuj_tekst(

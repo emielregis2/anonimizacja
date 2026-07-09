@@ -7,6 +7,7 @@ odfpy>=1.4
 flask>=3.0
 pytesseract>=0.3.13
 pdf2image>=1.17
+pillow>=10.0
 pypdf>=5.9
 reportlab>=4.4
 pyperclip>=1.11

@@ -536,3 +536,96 @@ def test_pdf_strona_bez_warstwy_tekstowej_zgloszona(tmp_path):
 
     wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
     assert wynik.get("strony_bez_warstwy_tekstowej") == [0]
+
+
+def _obraz_testowy(tmp_path, nazwa, tekst, rozmiar=(1400, 160), pozycja=(20, 40)):
+    from PIL import Image, ImageDraw, ImageFont
+    czcionka_projektu = Path(__file__).parent.parent / "anonimizator" / "czcionki" / "DejaVuSans-Bold.ttf"
+    img = Image.new("RGB", rozmiar, color="white")
+    d = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype(str(czcionka_projektu), 40)
+    except Exception:
+        font = ImageFont.load_default()
+    # Spacja koncowa daje OCR margines - bez niej tekst tuz przy krawedzi
+    # bywa ucinany (np. koncowka ".pl" e-maila), niezalezne od redakcji.
+    d.text(pozycja, tekst + "  ", fill="black", font=font)
+    sciezka = tmp_path / nazwa
+    img.save(sciezka)
+    return sciezka, img.size
+
+
+def test_obraz_zachowuje_reszte_tresci_i_wymiary(tmp_path):
+    """Kluczowa różnica względem starego trybu (nowy, pusty obraz z całym
+    tekstem od nowa): reszta treści na obrazie i jego wymiary zostają
+    nietknięte — tylko wykryty fragment jest zamalowany."""
+    sciezka, rozmiar_oryg = _obraz_testowy(
+        tmp_path, "notatka.png",
+        "Numer akt: 123/24  Kontakt: jan.kowalski@przyklad.pl",
+    )
+    wynik = anonimizuj_plik(sciezka, tmp_path / "wynik", "Haslo123!", kategorie=["email"],
+                             dolacz_prompt_ai=False)
+
+    from PIL import Image
+    obraz_wyn = Image.open(wynik["tekst"])
+    assert obraz_wyn.size == rozmiar_oryg  # canvas nietknięty, nie zbudowany od nowa
+
+    from anonimizator.extractors import wczytaj_tekst
+    tekst_wynikowy = wczytaj_tekst(wynik["tekst"])
+    assert "jan.kowalski@przyklad.pl" not in tekst_wynikowy
+    assert "[EMAIL_1]" in tekst_wynikowy
+    assert "Numer akt: 123/24" in tekst_wynikowy  # reszta treści zachowana
+
+
+def test_obraz_prompt_ai_dopisany_jako_pas_u_gory(tmp_path):
+    sciezka, rozmiar_oryg = _obraz_testowy(tmp_path, "pismo.png", "Kontakt: test@firma.pl")
+    wynik = anonimizuj_plik(sciezka, tmp_path / "wynik", "Haslo123!", kategorie=["email"])
+
+    from PIL import Image
+    obraz_wyn = Image.open(wynik["tekst"])
+    # prompt dopisany jako dodatkowy pas u gory -> obraz wynikowy wyzszy
+    # niz oryginal, ta sama szerokosc
+    assert obraz_wyn.size[0] == rozmiar_oryg[0]
+    assert obraz_wyn.size[1] > rozmiar_oryg[1]
+    assert wynik["prompt_ai"] != ""
+
+
+def test_pdf_strona_skanowana_redagowana_przez_ocr(tmp_path):
+    """Bonus tej sesji: strona-skan (obraz bez warstwy tekstowej) w PDF
+    jest teraz redagowana przez tę samą technikę OCR co JPG/PNG, zamiast
+    być tylko zgłaszaną jako niezredagowana."""
+    import fitz
+    sciezka_obrazu, _ = _obraz_testowy(
+        tmp_path, "skan_wejsciowy.png", "Klient: Kowalski", rozmiar=(800, 150),
+    )
+
+    p = tmp_path / "skan.pdf"
+    dokument = fitz.open()
+    strona = dokument.new_page(width=800, height=150)
+    strona.insert_image(strona.rect, filename=str(sciezka_obrazu))
+    dokument.save(str(p))
+    dokument.close()
+    # potwierdzenie, ze to faktycznie strona bez warstwy tekstowej (czysty obraz)
+    sprawdz = fitz.open(str(p))
+    assert sprawdz[0].get_text().strip() == ""
+    sprawdz.close()
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+
+    # strona zostala zredagowana przez fallback OCR, wiec NIE powinna
+    # trafic na liste niezredagowanych
+    assert not wynik.get("strony_bez_warstwy_tekstowej")
+
+    import pytesseract
+    sprawdz = fitz.open(str(wynik["tekst"]))
+    pixmap = sprawdz[0].get_pixmap()
+    from PIL import Image
+    import io
+    obraz_wyn = Image.open(io.BytesIO(pixmap.tobytes("png")))
+    tekst_po_ocr = pytesseract.image_to_string(obraz_wyn, lang="pol+eng")
+    sprawdz.close()
+    assert "Kowalski" not in tekst_po_ocr
+    # Nie sprawdzamy dokladnej tresci placeholdera przez re-OCR — male,
+    # stylizowane tokeny jak "[OSOBA_1]" bywaja odczytywane niedokladnie
+    # (np. nawiasy jako "()", "O" jako "0") niezaleznie od poprawnosci
+    # samej redakcji. Istotne jest, ze oryginalna wartosc znikla.

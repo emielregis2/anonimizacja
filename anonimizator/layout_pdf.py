@@ -13,11 +13,11 @@ przebiegiem (add_redact_annot + apply_redactions per strona).
 WAŻNE OGRANICZENIE (świadomie przyjęte na tym etapie): działa tylko dla
 stron z realną warstwą tekstową (dokumenty "born-digital" albo już
 przepuszczone przez OCR z osadzeniem tekstu). Strony będące czystym
-skanem (obraz bez warstwy tekstowej) nie mają czego "redagować" — na tym
-etapie takie strony są pomijane przez tę ścieżkę; PII w nich pozostanie
-niewykryte przez writer zachowujący layout. Docelowe rozwiązanie (OCR
-strony -> redakcja na współrzędnych z OCR, tak jak w warstwie dla
-obrazów JPG/PNG) to kolejny, osobny krok.
+skanem (obraz bez warstwy tekstowej) korzystają z uzupełniającej ścieżki
+w layout_images.anonimizuj_strone_skanowana_pdf() — OCR strony renderowanej
+jako obraz + redakcja na współrzędnych OCR, ta sama technika co dla
+JPG/PNG. Jeśli Tesseract nie jest zainstalowany, taka strona pozostaje
+niezredagowana i trafia na listę strony_bez_warstwy_tekstowej.
 
 Ograniczenie techniczne: page.search_for dopasowuje dokładny, literalny
 tekst — jeśli PDF ma nietypowe odstępy wewnętrzne (np. z kerningu przy
@@ -51,9 +51,8 @@ def anonimizuj_pdf_zachowaj_layout(
     osobowe bezpośrednio na oryginalnych stronach.
 
     Zwraca listę numerów stron (0-indeksowanych), które wyglądają na
-    skan bez warstwy tekstowej — te strony NIE zostały poddane redakcji
-    tą ścieżką (patrz ograniczenie w docstringu modułu) i wymagają
-    ręcznej weryfikacji albo przetworzenia starą ścieżką OCR."""
+    skan bez warstwy tekstowej I nie udało się ich zredagować (Tesseract
+    niedostępny albo błąd OCR) — te strony wymagają ręcznej weryfikacji."""
     import fitz
     dokument = fitz.open(str(sciezka_wejsciowa))
     strony_bez_warstwy_tekstowej = []
@@ -61,7 +60,18 @@ def anonimizuj_pdf_zachowaj_layout(
     for numer_strony, strona in enumerate(dokument):
         tekst_strony = strona.get_text()
         if len(tekst_strony.strip()) < PROG_PUSTEJ_STRONY:
-            strony_bez_warstwy_tekstowej.append(numer_strony)
+            zredagowano = False
+            try:
+                from . import extractors
+                if extractors._tesseract_dostepny():
+                    from . import layout_images
+                    zredagowano = layout_images.anonimizuj_strone_skanowana_pdf(
+                        strona, silnik, kategorie=kategorie, tryb_ai=tryb_ai,
+                    )
+            except Exception:
+                zredagowano = False
+            if not zredagowano:
+                strony_bez_warstwy_tekstowej.append(numer_strony)
             continue
 
         cokolwiek_do_redakcji = False
