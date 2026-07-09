@@ -23,7 +23,7 @@ Wszystkie 9 funkcji, o które prosiłeś, są teraz zaimplementowane:
 | # | Funkcja | Jak zrealizowana |
 |---|---|---|
 | 1 | 25+ kategorii polskich danych | 26 kategorii; 5 z sumą kontrolną (PESEL, NIP, REGON, IBAN, dowód osobisty — norma ICAO 9303) |
-| 2 | PDF, DOCX, ODT, RTF, TXT + OCR skanów/obrazów | `extractors.py` — automatyczny OCR (Tesseract, lokalnie) dla stron PDF bez warstwy tekstowej oraz dla JPG/PNG |
+| 2 | PDF, DOCX, ODT, RTF, TXT + OCR skanów/obrazów | `extractors.py` — automatyczny OCR (Tesseract, lokalnie) dla stron PDF bez warstwy tekstowej oraz dla JPG/PNG. DOCX i PDF dodatkowo zachowują layout oryginału (patrz sekcja niżej) |
 | 3 | Wiele plików naraz (2 tryby) | `anonimizuj_wiele_plikow(..., tryb="jedna_sprawa"/"niezalezne")` |
 | 4 | Tryb Archiwum/BIP | `anonimizuj_bip(...)` — bez hasła, bez pliku mapowania, bezpowrotne |
 | 5 | Raport anonimizacji (PDF z hasłem) | `generuj_raport_pdf(...)` — tabela placeholder→wartość, AES-256 w samym PDF |
@@ -138,6 +138,54 @@ i przeglądarka są na tej samej maszynie). Dzięki temu backend zna pełną
 i zapisuje wynik **bezpośrednio w katalogu pliku źródłowego** zamiast
 tylko oferować pobranie przez przeglądarkę.
 
+## Zachowanie layoutu oryginału (DOCX, PDF)
+
+Domyślnie (`zachowaj_layout=True`) DOCX i PDF są anonimizowane **w miejscu**,
+zamiast — jak poprzednio — wyciągnięciem czystego tekstu i zbudowaniem
+zupełnie nowego dokumentu od zera. Formatowanie, tabele, obrazy, nagłówki,
+stopki, kolumny i czcionki oryginału zostają nietknięte.
+
+**DOCX** (`anonimizator/layout_docx.py`) — edycja na poziomie "runów"
+(fragmentów tekstu ze wspólnym formatowaniem): wykrywamy PII na płaskim
+tekście każdego akapitu, po czym podmieniamy tylko tekst odpowiednich
+runów, nie ruszając ich formatowania (pogrubienia, kolory, styl, czcionka).
+Obejmuje akapity głównej treści, tabele (rekurencyjnie, też zagnieżdżone),
+nagłówki i stopki wszystkich sekcji.
+
+**PDF** (`anonimizator/layout_pdf.py`) — prawdziwa redakcja przez PyMuPDF
+(`add_redact_annot` + `apply_redactions`): tekst jest **faktycznie usuwany**
+z warstwy tekstowej PDF, nie tylko wizualnie zasłonięty jak zwykłe
+"zamalowanie" — nie da się go odzyskać przez zaznaczenie/kopiowanie ani
+ponowną ekstrakcję. W miejscu redakcji wstawiany jest placeholder.
+
+```bash
+python cli.py anonimizuj dokument.docx --haslo "..." --wszystko --bez-zachowania-layoutu
+```
+
+(flaga analogiczna dla PDF; jawne wyłączenie wraca do starego trybu
+"wyciągnij tekst -> zbuduj dokument od nowa" — np. do porównania albo
+jeśli konkretny plik sprawia problemy).
+
+**Ograniczenie dla PDF:** strony bez warstwy tekstowej (czyste skany) nie
+mają czego zredagować tą ścieżką — nie ma na nich tekstu do wyszukania
+współrzędnych. Takie strony są zgłaszane (pole `strony_bez_warstwy_tekstowej`
+w wyniku, widoczne ostrzeżenie w interfejsie webowym), a nie cicho
+pomijane. Docelowe rozwiązanie (OCR strony + redakcja na współrzędnych
+z OCR) to naturalne rozszerzenie mechanizmu planowanego dla obrazów
+JPG/PNG (patrz "Sugerowane następne kroki").
+
+**Nowa zależność:** `pymupdf` (import jako `fitz`) — jedyna biblioteka
+w projekcie z realną funkcją redakcji PDF. **Uwaga licencyjna:** PyMuPDF
+jest licencjonowany dualnie — GNU AGPL v3.0 albo komercyjna licencja
+Artifex. Używanie go w projekcie wewnętrznym/niekomercyjnym nie rodzi
+problemu, ale **dystrybucja skompilowanej aplikacji** (np. jako .exe do
+osób trzecich) pod AGPL wymagałaby udostępnienia pełnego kodu źródłowego
+projektu na tej samej licencji, chyba że zostanie wykupiona licencja
+komercyjna Artifex — dokładnie to samo ryzyko licencyjne, które
+zidentyfikowaliśmy przy okazji audytu SBOM konkurencyjnego narzędzia
+Beznazwisk (patrz notatka oceny ryzyka). Do rozważenia przed ewentualną
+dystrybucją poza organizację.
+
 ## Wielojęzyczne słowniki (funkcja 9)
 
 ```python
@@ -216,13 +264,25 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
 - **OCR jakości zależnej od skanu.** Niska rozdzielczość, pochylone
   strony czy odręczne pismo obniżają skuteczność. 300 DPI (domyślne w
   module) to rozsądny punkt startowy.
-- **Zachowanie formatu wyjściowego (`_anon`) odtwarza treść, nie layout.**
-  DOCX/ODT: podział na akapity tak, formatowanie znak-po-znaku (pogrubienia,
-  kolory, style) nie. PDF/RTF: całkiem nowy, uproszczony dokument z czystym
-  tekstem — bez kolumn, tabel, obrazów ani oryginalnej czcionki. Obrazy
-  (JPG/PNG): nowy obraz z tekstem na białym tle, nie edycja oryginalnego
-  zdjęcia. To świadomy kompromis — priorytetem jest zniknięcie danych
-  wrażliwych z treści, nie wizualna wierność oryginałowi.
+- **Zachowanie layoutu oryginału obejmuje DOCX i PDF, nie wszystkie formaty.**
+  ODT: nadal stary tryb (wyciągnij tekst → zbuduj dokument od nowa) —
+  formatowanie znak-po-znaku nie jest zachowane. RTF: to samo, i raczej
+  tak zostanie — `striprtf` to biblioteka wyłącznie do ekstrakcji, nie
+  edycji w miejscu; realna edycja RTF wymagałaby innego narzędzia,
+  nieproporcjonalny nakład względem tego, jak rzadko RTF pojawia się dziś
+  w praktyce. Obrazy (JPG/PNG): nadal nowy obraz z tekstem na białym tle
+  zamiast edycji oryginalnego zdjęcia — kolejny krok na liście (patrz
+  "Sugerowane następne kroki"), wspólna technika z brakującym elementem
+  PDF opisanym niżej.
+- **PDF: strony bez warstwy tekstowej (czyste skany) nie są redagowane
+  ścieżką zachowującą layout.** Nie ma na nich przeszukiwalnego tekstu,
+  więc nie da się znaleźć współrzędnych do redakcji. Takie strony są
+  zgłaszane (`strony_bez_warstwy_tekstowej` w wyniku, widoczne ostrzeżenie
+  w interfejsie i CLI) — nie są cicho pomijane, ale też nie są
+  zabezpieczone tą ścieżką. Do czasu wdrożenia OCR+redakcji na
+  współrzędnych: dla takich plików warto użyć `--bez-zachowania-layoutu`
+  (stary tryb OCR → nowy dokument tekstowy, który *nie* ma tego problemu,
+  kosztem layoutu).
 - **Styl `puste` jest odwracalny wyłącznie do celów raportu/audytu** —
   nie da się z niego automatycznie przywrócić tekstu (to zamierzone).
 - **Auto-deanonimizacja trzyma mapowanie w pamięci serwera** przez czas
@@ -232,8 +292,13 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
   wielojęzycznej, nie kompletna baza danych jak pakiet `pl`. Łatwo
   rozszerzyć, podmieniając pliki w `dane_slownikowe/` (patrz
   `ZRODLA.md` po wzór dokumentacji źródła danych).
+- **Tryb wsadowy "jedna sprawa" nie wspiera jeszcze zachowania layoutu** —
+  zawsze używa starego trybu, nawet dla DOCX/PDF (wymagałoby współdzielenia
+  stanu silnika ze ścieżką edycji w miejscu per plik — nie zaimplementowane).
+  Tryb "niezależne" pliki wspiera to w pełni, bo każdy plik przechodzi
+  osobno przez zwykły `anonimizuj_plik()`.
 - **To nie jest gotowy "plug-and-play" produkt komercyjny** — architektura
-  i pipeline end-to-end są solidne i przetestowane (34 testy jednostkowe),
+  i pipeline end-to-end są solidne i przetestowane (44 testy jednostkowe),
   ale przed użyciem produkcyjnym z danymi rzeczywistymi
   klientów warto dostroić słowniki/progi na Waszych dokumentach.
 
@@ -247,7 +312,9 @@ anonimizator/
 │   ├── slowniki_recognizers.py   recognizery słownikowe, wielojęzyczne
 │   ├── dane_slownikowe/          pliki imion/nazwisk/miast per język + ZRODLA.md
 │   ├── ai_ner.py                 opcjonalny lokalny model NER (Tryb AI)
-│   ├── extractors.py             TXT/DOCX/ODT/RTF/PDF/JPG/PNG + OCR
+│   ├── extractors.py             TXT/DOCX/ODT/RTF/PDF/JPG/PNG + OCR (stary tryb zapisu)
+│   ├── layout_docx.py            DOCX z zachowaniem formatowania/tabel/nagłówków
+│   ├── layout_pdf.py             PDF z prawdziwą redakcją przez PyMuPDF
 │   ├── crypto.py                 szyfrowanie mapowania (PBKDF2 + Fernet)
 │   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP, prompt AI
 │   ├── deanonimizator.py         przywracanie oryginału (usuwa dopisany prompt AI)
@@ -259,18 +326,26 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        34 testy jednostkowe
+└── tests/                        44 testy jednostkowe
 ```
 
 ## Sugerowane następne kroki
 
-1. Lematyzacja (np. Morfeusz2) dla nazwisk/miejscowości — najskuteczniejsze
+1. Redakcja obrazów JPG/PNG w miejscu (Tesseract z bounding boxami
+   zamiast czystego tekstu) — ta sama technika domknie przy okazji
+   ograniczenie z redakcji PDF (strony-skany bez warstwy tekstowej).
+2. Lematyzacja (np. Morfeusz2) dla nazwisk/miejscowości — najskuteczniejsze
    rozwiązanie problemu odmiany przez przypadki bez pełnego Trybu AI.
-2. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
+3. Zachowanie layoutu dla trybu wsadowego "jedna sprawa" (dziś tylko
+   pojedyncze pliki i tryb "niezależne" — patrz "Znane ograniczenia").
+4. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
    `pl` — o ile dokumenty realnie zawierają dane z tych krajów.
-3. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
+5. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
    realnych, ale niewrażliwych dokumentach testowych.
-4. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
+6. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
    OCR na rzeczywistych dokumentach firmowych bywa różna.
-5. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
+7. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
    sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.
+8. Przed ewentualną dystrybucją poza organizację: rozstrzygnąć licencję
+   PyMuPDF (AGPL v3 vs komercyjna Artifex) — patrz sekcja "Zachowanie
+   layoutu oryginału" wyżej.

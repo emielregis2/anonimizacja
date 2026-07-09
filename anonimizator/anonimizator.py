@@ -447,6 +447,7 @@ def anonimizuj_wiele_plikow(
     styl: str = "pelny_token",
     jezyki: list[str] | None = None,
     dolacz_prompt_ai: bool = True,
+    zachowaj_layout: bool = True,
 ) -> dict:
     """
     Przetwarza wiele plików naraz.
@@ -454,8 +455,14 @@ def anonimizuj_wiele_plikow(
     tryb="jedna_sprawa": wspólna numeracja tokenów i jedno wspólne, zaszyfrowane
         mapowanie dla wszystkich plików — ten sam "Jan Kowalski" w trzech
         dokumentach tej samej sprawy dostaje ten sam token wszędzie.
+        UWAGA: ten tryb NIE wspiera jeszcze zachowaj_layout — zawsze używa
+        starej ścieżki "wyciągnij tekst -> zbuduj dokument od nowa", nawet
+        dla DOCX/PDF. Wymagałoby to współdzielenia stanu silnika (spójna
+        numeracja) razem z edycją w miejscu per plik — nie zaimplementowane.
     tryb="niezalezne": każdy plik ma własną, niezależną numerację i własny
-        plik mapowania (dokładnie jak przy pojedynczym anonimizuj_plik).
+        plik mapowania (dokładnie jak przy pojedynczym anonimizuj_plik) —
+        w pełni wspiera zachowaj_layout, bo każdy plik przechodzi osobno
+        przez anonimizuj_plik().
 
     dolacz_prompt_ai: patrz anonimizuj_plik. W trybie "jedna_sprawa" każdy
         plik dostaje prompt zawierający tylko te tokeny, które faktycznie
@@ -475,9 +482,10 @@ def anonimizuj_wiele_plikow(
                 sciezka, katalog_wyjsciowy, haslo,
                 kategorie=kategorie, tryb_ai=tryb_ai,
                 usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
-                dolacz_prompt_ai=dolacz_prompt_ai,
+                dolacz_prompt_ai=dolacz_prompt_ai, zachowaj_layout=zachowaj_layout,
             )
         return {"tryb": tryb, "pliki": wyniki_per_plik}
+
 
     # tryb == "jedna_sprawa": jeden wspólny silnik na wszystkie pliki
     silnik = SilnikAnonimizacji(styl=styl)

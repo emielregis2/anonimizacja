@@ -51,8 +51,23 @@ wystąpień czy przynależność administracyjna).
 dopasowanie odbywa się po dokładnym dopasowaniu formy mianownikowej (lub
 takiej, w jakiej dana wartość występuje w rejestrze źródłowym). Odmienione
 formy ("Kowalskiego", "Krakowie") nie zostaną wykryte bez Trybu AI
-(lokalny model spaCy, patrz ai_ner.py). Zabezpieczeniem przed fałszywymi
-trafieniami na początku zdań (gdzie każde słowo, nie tylko nazwy własne,
-pisane jest wielką literą) jest funkcja `_na_poczatku_zdania` w
-`slowniki_recognizers.py`, stosowana zarówno do samodzielnych nazwisk,
-jak i do miejscowości.
+(lokalny model spaCy, patrz ai_ner.py).
+
+Dwa zabezpieczenia przed fałszywymi trafieniami (oba w
+`slowniki_recognizers.py`), stosowane do samodzielnych nazwisk i do
+miejscowości:
+
+- `_na_poczatku_zdania` — pomija dopasowanie na samym początku zdania
+  (każde zdanie zaczyna się wielką literą, niezależnie od tego, czy to
+  akurat nazwisko/miejscowość, czy zwykłe słowo).
+- `_tylko_to_slowo` — wyjątek od powyższego: jeśli cały przekazany
+  fragment (np. cała komórka tabeli, całe pole formularza) to dokładnie
+  to jedno dopasowanie, to nie jest to "zdanie" w sensie tego zabezpieczenia
+  i dopasowanie jest przyjmowane mimo pozycji 0 — typowy przypadek to
+  komórka tabeli zawierająca wyłącznie nazwisko.
+
+Przy tak dużych bazach (598k nazwisk, 68k imion) trzeba liczyć się z tym,
+że część zwykłych polskich słów jest jednocześnie realnie zarejestrowanym
+imieniem lub nazwiskiem w PESEL — np. "Strona" i "Dane" to sprawdzone,
+prawdziwe przykłady (odpowiednio nazwisko i imię). To świadomie
+zaakceptowany kompromis recall/precyzja, nie błąd.

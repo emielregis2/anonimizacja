@@ -101,11 +101,15 @@ def cmd_anonimizuj(args):
         usun_numery_stron=args.usun_numery_stron,
         styl=args.styl, jezyki=jezyki,
         dolacz_prompt_ai=not args.bez_promptu_ai,
+        zachowaj_layout=not args.bez_zachowania_layoutu,
     )
 
     print(f"Zapisano: {wynik['tekst']}")
     print(f"Zapisano (zaszyfrowane): {wynik['mapowanie']}")
     _wypisz_wykrycia(wynik["liczba_wykryc"])
+    if wynik.get("strony_bez_warstwy_tekstowej"):
+        print(f"UWAGA: strony {wynik['strony_bez_warstwy_tekstowej']} (0-indeksowane) "
+              "wyglądają na skan bez warstwy tekstowej — NIE zostały zredagowane.")
 
     if args.raport_pdf:
         sciezka_raportu = Path(args.katalog_wyjsciowy) / f"{sciezka.stem}_raport.pdf"
@@ -137,6 +141,7 @@ def cmd_anonimizuj_wsadowo(args):
         kategorie=kategorie, tryb_ai=args.tryb_ai,
         usun_numery_stron=args.usun_numery_stron, styl=args.styl, jezyki=jezyki,
         dolacz_prompt_ai=not args.bez_promptu_ai,
+        zachowaj_layout=not args.bez_zachowania_layoutu,
     )
 
     print(f"Tryb: {wynik['tryb']}")
@@ -213,6 +218,10 @@ def _dodaj_wspolne_argumenty(parser):
     parser.add_argument("--bez-promptu-ai", action="store_true",
                          help="Nie dołączaj automatycznie promptu dla AI na początku pliku wynikowego "
                               "(domyślnie prompt jest dołączany, żeby plik był samowystarczalny)")
+    parser.add_argument("--bez-zachowania-layoutu", action="store_true",
+                         help="Dla DOCX/PDF: wymuś stary tryb 'wyciągnij tekst -> zbuduj dokument "
+                              "od nowa' zamiast domyślnej edycji w miejscu z zachowaniem formatowania, "
+                              "tabel, obrazów i (dla PDF) prawdziwą redakcją tekstu")
 
 
 def main():
