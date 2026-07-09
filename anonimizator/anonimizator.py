@@ -152,6 +152,20 @@ class WynikAnonimizacji:
     liczba_wykryc: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class Zamiana:
+    """Pojedyncza podmiana: pozycja w tekście źródłowym + oryginalna
+    wartość + przypisany placeholder. Używane zarówno przez przetworz()
+    (składanie zwykłego tekstu) jak i przez writery zachowujące layout
+    (DOCX/PDF/obraz w extractors.py), które aplikują te same podmiany
+    bezpośrednio na strukturze oryginalnego dokumentu zamiast budować
+    go od nowa z gołego tekstu."""
+    start: int
+    end: int
+    oryginal: str
+    placeholder: str
+
+
 class SilnikAnonimizacji:
     """
     Silnik z zachowanym stanem (liczniki, mapowanie) — pozwala przetworzyć
@@ -192,8 +206,16 @@ class SilnikAnonimizacji:
             return "[USUNIĘTE]"
         raise AssertionError("nieosiągalne")
 
-    def przetworz(self, tekst: str, kategorie: list[str] | None = None,
-                   tryb_ai: bool = False) -> str:
+    def wyznacz_zamiany(self, tekst: str, kategorie: list[str] | None = None,
+                         tryb_ai: bool = False) -> list[Zamiana]:
+        """Wykrywa PII i przypisuje placeholdery — dokładnie ta sama logika
+        co przetworz(), ale zwraca listę Zamiana zamiast składać gotowy
+        string. Dzięki temu writery zachowujące layout oryginału (DOCX/PDF/
+        obraz) mogą aplikować te same, spójnie ponumerowane podmiany
+        bezpośrednio na strukturze dokumentu (np. per akapit/run w DOCX,
+        per strona w PDF), zamiast operować na jednym płaskim tekście
+        całego dokumentu na raz — przetworz() nadal woła tę metodę wewnątrz,
+        więc zachowanie dla zwykłego tekstu jest identyczne jak wcześniej."""
         kategorie = kategorie or WSZYSTKIE_KATEGORIE
 
         wszystkie_dopasowania: list[Match] = []
@@ -208,9 +230,7 @@ class SilnikAnonimizacji:
 
         dopasowania = _rozwiaz_nakladania(wszystkie_dopasowania)
 
-        fragmenty = []
-        ostatnia_pozycja = 0
-
+        zamiany: list[Zamiana] = []
         for m in dopasowania:
             klucz_wartosci = (m.category, m.text.lower())
 
@@ -232,9 +252,18 @@ class SilnikAnonimizacji:
                 placeholder = self._wartosc_do_placeholdera[klucz_wartosci]
 
             self.liczba_wykryc[m.category] = self.liczba_wykryc.get(m.category, 0) + 1
-            fragmenty.append(tekst[ostatnia_pozycja:m.start])
-            fragmenty.append(placeholder)
-            ostatnia_pozycja = m.end
+            zamiany.append(Zamiana(m.start, m.end, m.text, placeholder))
+        return zamiany
+
+    def przetworz(self, tekst: str, kategorie: list[str] | None = None,
+                   tryb_ai: bool = False) -> str:
+        zamiany = self.wyznacz_zamiany(tekst, kategorie=kategorie, tryb_ai=tryb_ai)
+        fragmenty = []
+        ostatnia_pozycja = 0
+        for z in zamiany:
+            fragmenty.append(tekst[ostatnia_pozycja:z.start])
+            fragmenty.append(z.placeholder)
+            ostatnia_pozycja = z.end
         fragmenty.append(tekst[ostatnia_pozycja:])
         return "".join(fragmenty)
 
