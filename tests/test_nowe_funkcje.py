@@ -198,6 +198,26 @@ def test_samodzielne_nazwisko_na_poczatku_zdania_nie_jest_wykrywane():
     assert wyniki[0].start == tekst.rindex("Kowalski")  # to drugie, nie pierwsze wystąpienie
 
 
+def test_miasto_na_poczatku_zdania_nie_jest_wykrywane():
+    """To samo zabezpieczenie co przy nazwiskach, zastosowane do
+    rozszerzonego (58 025 pozycji) słownika miejscowości."""
+    from anonimizator.slowniki_recognizers import recognize_miasta
+    tekst = "Warszawa to stolica Polski. Mieszkam w Warszawa od lat."
+    wyniki = recognize_miasta(tekst, jezyki=("pl",))
+    assert len(wyniki) == 1
+    assert wyniki[0].start == tekst.rindex("Warszawa")
+
+
+def test_miasto_srodku_zdania_wykrywane():
+    from anonimizator.slowniki_recognizers import recognize_miasta
+    # Mianownik celowo (brak lematyzacji w silniku bez Trybu AI — "Krakowie"
+    # jako forma odmieniona nie zostałoby dopasowane, to osobne, znane
+    # ograniczenie opisane w notatce o mechanizmie wykrywania).
+    wyniki = recognize_miasta("Sprawa toczy się przed sądem w mieście Kraków.", jezyki=("pl",))
+    assert len(wyniki) == 1
+    assert wyniki[0].text == "Kraków"
+
+
 def test_nazwa_pliku_wynikowego_ma_przyrostek_anon_i_oryginalne_rozszerzenie(tmp_path):
     p = tmp_path / "umowa.txt"
     p.write_text("Jan Kowalski podpisal umowe.")

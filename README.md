@@ -22,15 +22,15 @@ Wszystkie 9 funkcji, o które prosiłeś, są teraz zaimplementowane:
 
 | # | Funkcja | Jak zrealizowana |
 |---|---|---|
-| 1 | 25+ kategorii polskich danych | 26 kategorii, regex + suma kontrolna gdzie możliwe |
+| 1 | 25+ kategorii polskich danych | 26 kategorii; 5 z sumą kontrolną (PESEL, NIP, REGON, IBAN, dowód osobisty — norma ICAO 9303) |
 | 2 | PDF, DOCX, ODT, RTF, TXT + OCR skanów/obrazów | `extractors.py` — automatyczny OCR (Tesseract, lokalnie) dla stron PDF bez warstwy tekstowej oraz dla JPG/PNG |
 | 3 | Wiele plików naraz (2 tryby) | `anonimizuj_wiele_plikow(..., tryb="jedna_sprawa"/"niezalezne")` |
 | 4 | Tryb Archiwum/BIP | `anonimizuj_bip(...)` — bez hasła, bez pliku mapowania, bezpowrotne |
 | 5 | Raport anonimizacji (PDF z hasłem) | `generuj_raport_pdf(...)` — tabela placeholder→wartość, AES-256 w samym PDF |
 | 6 | Auto-deanonimizacja (wklej odpowiedź AI) | Panel w interfejsie webowym — wklejasz tekst, tokeny wracają na żywo |
-| 7 | Dowolny model AI | Naturalna właściwość — wynik to zwykły tekst |
+| 7 | Dowolny model AI | Naturalna właściwość — wynik to zwykły tekst; każdy plik wynikowy automatycznie niesie własny prompt instruujący AI, by nie zmieniało placeholderów (patrz sekcja niżej) |
 | 8 | Wybór stylu anonimizacji | 4 style: `pelny_token`, `etykieta`, `inicjaly`, `puste` |
-| 9 | Słowniki imion/miast, języki obce | PL (rozszerzone), + UK, FR, SK, CZ — dobierane parametrem `jezyki` |
+| 9 | Słowniki imion/miast/nazwisk, języki obce | PL: 68 183 imion + 598 476 nazwisk + 58 025 miejscowości (dane GUS/dane.gov.pl, CC0) — samodzielne wykrywanie nazwisk i miejscowości, nie tylko po kotwicy; UK/FR/SK/CZ nadal jako szkielet architektury (patrz "Znane ograniczenia") |
 
 Uczciwie o granicach tej realizacji — patrz sekcja "Znane ograniczenia" niżej.
 
@@ -109,6 +109,35 @@ była w ogóle możliwa. Ponieważ serwer nasłuchuje wyłącznie na
 sesję" po zakończeniu pracy, jeśli to Cię niepokoi. Ten mechanizm nie jest
 dostępny dla stylu `puste` (z definicji nieodwracalny) ani w trybie BIP.
 
+## Automatyczny prompt dla AI (funkcja 7)
+
+Każdy plik wynikowy (styl inny niż `puste`, poza trybem BIP) domyślnie
+dostaje na początku treści prompt instruujący model AI, żeby nie zmieniał
+placeholderów — wygenerowany dynamicznie na podstawie faktycznego
+mapowania danego dokumentu (nie sztywny wzorzec zakładający jeden format
+tokenu). Dzięki temu plik jest od razu samowystarczalny — przydatne przy
+automatyzacji całych serii dokumentów, bo każdy plik "niesie" swój własny
+prompt bez ręcznego dopisywania.
+
+```bash
+python cli.py anonimizuj dokument.docx --haslo "..." --wszystko --bez-promptu-ai
+```
+
+Znacznik `GRANICA_PROMPTU_AI` (w `anonimizator.py`) jest rozpoznawany
+przez `deanonimizuj_tekst`/`deanonimizuj_plik` i automatycznie usuwany
+przed przywróceniem oryginału — odtworzony dokument nie zawiera dopisku,
+mimo że plik wysyłany do AI go zawierał.
+
+## Wybór pliku z dysku (interfejs webowy)
+
+Obok standardowego przeciągnięcia pliku do przeglądarki, przycisk
+**PRZEGLĄDAJ (DYSK)** otwiera natywne okno Windows (endpoint
+`/wybierz_pliki_dysk`, `tkinter.filedialog` — działa lokalnie, bo Flask
+i przeglądarka są na tej samej maszynie). Dzięki temu backend zna pełną
+ścieżkę pliku, czego zwykły upload w przeglądarce świadomie nie ujawnia,
+i zapisuje wynik **bezpośrednio w katalogu pliku źródłowego** zamiast
+tylko oferować pobranie przez przeglądarkę.
+
 ## Wielojęzyczne słowniki (funkcja 9)
 
 ```python
@@ -117,8 +146,29 @@ anonimizuj_tekst(tekst, jezyki=["pl", "fr", "sk"])
 
 Dostępne pakiety: `pl`, `uk`, `fr`, `sk`, `cz` (pliki w
 `anonimizator/dane_slownikowe/`). Dorzucenie kolejnego języka to dodanie
-dwóch plików tekstowych (`imiona_XX.txt`, `miasta_XX.txt`) — zero zmian
-w kodzie.
+plików tekstowych (`imiona_XX.txt`, `miasta_XX.txt`) — zero zmian w kodzie.
+
+Pakiet `pl` jest oficjalnym, pełnym rejestrem (GUS/dane.gov.pl, licencja
+CC0 — pełne źródła w `dane_slownikowe/ZRODLA.md`):
+
+| Plik | Wpisów | Źródło |
+|---|---|---|
+| `imiona_pl.txt` | 68 183 | rejestr PESEL (osoby żyjące) |
+| `nazwiska_pl.txt` | 598 476 | rejestr PESEL (osoby żyjące) |
+| `miasta_pl.txt` | 58 025 | TERYT/SIMC (wykaz urzędowych nazw miejscowości) |
+
+Nazwiska i miejscowości są wykrywane **samodzielnie** (nie tylko po
+kotwicy w postaci poprzedzającego imienia) — zabezpieczone przed
+fałszywymi trafieniami na początku zdania (`_na_poczatku_zdania` w
+`slowniki_recognizers.py`). Świadomy kompromis: większa baza = więcej
+recall, kosztem drobnego ryzyka fałszywych trafień na słowach
+pokrywających się z nazwiskami odzawodowymi/odpospolitymi (np. "Kowal",
+"Wilk") — uznany za akceptowalny w kontekście ochrony danych osobowych,
+gdzie koszt pominięcia jest wyższy niż koszt nadmiarowego zamaskowania.
+
+Pakiety `uk`/`fr`/`sk`/`cz` pozostają umiarkowanej wielkości (patrz
+"Znane ograniczenia") — naturalny kierunek rozbudowy, jeśli dokumenty
+będą zawierać więcej danych z tych krajów.
 
 ## OCR skanów i obrazów (funkcja 2)
 
@@ -158,8 +208,11 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
 ## Znane ograniczenia (uczciwie, żeby nie przemilczeć)
 
 - **Recognizery słownikowe nie stosują lematyzacji.** "Warszawy"
-  (dopełniacz) nie dopasuje się do wpisu "warszawa". Tryb AI (spaCy)
-  istotnie to poprawia, jeśli zainstalowany.
+  (dopełniacz) nie dopasuje się do wpisu "Warszawa". Tryb AI (spaCy)
+  istotnie to poprawia, jeśli zainstalowany. Rozważana alternatywa bez
+  pełnego modelu NER: analizator morfologiczny (Morfeusz2) sprowadzający
+  słowo do formy podstawowej przed porównaniem ze słownikiem — nie
+  zaimplementowane.
 - **OCR jakości zależnej od skanu.** Niska rozdzielczość, pochylone
   strony czy odręczne pismo obniżają skuteczność. 300 DPI (domyślne w
   module) to rozsądny punkt startowy.
@@ -174,12 +227,13 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
   nie da się z niego automatycznie przywrócić tekstu (to zamierzone).
 - **Auto-deanonimizacja trzyma mapowanie w pamięci serwera** przez czas
   trwania sesji — patrz kompromis opisany wyżej.
-- **Słowniki obcojęzyczne (UK/FR/SK/CZ) są umiarkowanej wielkości**
+- **Słowniki obcojęzyczne (UK/FR/SK/CZ) są nadal umiarkowanej wielkości**
   (kilkadziesiąt–150 pozycji) — solidny szkielet architektury
-  wielojęzycznej, nie kompletna baza danych. Łatwo rozszerzyć,
-  podmieniając pliki w `dane_slownikowe/`.
+  wielojęzycznej, nie kompletna baza danych jak pakiet `pl`. Łatwo
+  rozszerzyć, podmieniając pliki w `dane_slownikowe/` (patrz
+  `ZRODLA.md` po wzór dokumentacji źródła danych).
 - **To nie jest gotowy "plug-and-play" produkt komercyjny** — architektura
-  i pipeline end-to-end są solidne i przetestowane (22 testy jednostkowe),
+  i pipeline end-to-end są solidne i przetestowane (34 testy jednostkowe),
   ale przed użyciem produkcyjnym z danymi rzeczywistymi
   klientów warto dostroić słowniki/progi na Waszych dokumentach.
 
@@ -191,29 +245,32 @@ anonimizator/
 │   ├── __init__.py
 │   ├── recognizers.py            regex + walidacja sum kontrolnych
 │   ├── slowniki_recognizers.py   recognizery słownikowe, wielojęzyczne
-│   ├── dane_slownikowe/          pliki imion/miast per język
+│   ├── dane_slownikowe/          pliki imion/nazwisk/miast per język + ZRODLA.md
 │   ├── ai_ner.py                 opcjonalny lokalny model NER (Tryb AI)
 │   ├── extractors.py             TXT/DOCX/ODT/RTF/PDF/JPG/PNG + OCR
 │   ├── crypto.py                 szyfrowanie mapowania (PBKDF2 + Fernet)
-│   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP
-│   ├── deanonimizator.py         przywracanie oryginału
+│   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP, prompt AI
+│   ├── deanonimizator.py         przywracanie oryginału (usuwa dopisany prompt AI)
 │   ├── raport.py                 raport PDF zabezpieczony hasłem
 │   ├── czcionki_pdf.py           wspólna rejestracja czcionki DejaVu (PDF)
 │   └── czcionki/                 czcionka DejaVu (polskie znaki w PDF)
-├── app.py                        aplikacja webowa (drag&drop, wszystkie funkcje)
+├── app.py                        aplikacja webowa (GUI w stylu ciemnego "chrome",
+│                                  wybór pliku z dysku, wszystkie funkcje)
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        22 testy jednostkowe
+└── tests/                        34 testy jednostkowe
 ```
 
 ## Sugerowane następne kroki
 
-1. Rozszerzyć słowniki (miasta, imiona, w tym obcojęzyczne) o pełniejsze
-   listy referencyjne zamiast plików w repozytorium.
-2. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
+1. Lematyzacja (np. Morfeusz2) dla nazwisk/miejscowości — najskuteczniejsze
+   rozwiązanie problemu odmiany przez przypadki bez pełnego Trybu AI.
+2. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
+   `pl` — o ile dokumenty realnie zawierają dane z tych krajów.
+3. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
    realnych, ale niewrażliwych dokumentach testowych.
-3. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
+4. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
    OCR na rzeczywistych dokumentach firmowych bywa różna.
-4. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
+5. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
    sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.

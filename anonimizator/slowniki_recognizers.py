@@ -91,16 +91,21 @@ PREFIKSY_INSTYTUCJI = re.compile(
 
 
 def recognize_miasta(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match]:
+    """Miejscowości bywają wielowyrazowe (np. "Nowy Sącz", "Bielsko-Biała") —
+    sprawdzamy sekwencje do 3 słów zaczynających się wielką literą.
+
+    Tak jak przy samodzielnych nazwiskach: dopasowanie na samym początku
+    zdania jest pomijane (zabezpieczenie przed częstymi fałszywymi
+    trafieniami — pierwsze słowo zdania zawsze jest pisane wielką literą,
+    niezależnie od tego, czy przypadkiem pokrywa się z nazwą miejscowości)."""
     miasta = _miasta_dla_jezykow(jezyki)
     wyniki = []
-    # miasta bywają wielowyrazowe (np. "Nowy Sącz", "Bielsko-Biała") —
-    # sprawdzamy sekwencje do 3 słów zaczynających się wielką literą
     for m in re.finditer(
         r"\b[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż\-]+"
         r"(\s[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż\-]+){0,2}\b",
         text,
     ):
-        if m.group(0).lower() in miasta:
+        if m.group(0).lower() in miasta and not _na_poczatku_zdania(text, m.start()):
             wyniki.append(Match(m.start(), m.end(), m.group(0), "miasta"))
     return wyniki
 
