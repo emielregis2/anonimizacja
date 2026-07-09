@@ -149,10 +149,53 @@ def test_wielojezyczne_slowniki_wykrywaja_obce_imiona():
     assert "Jean" not in wynik.tekst_zanonimizowany
 
 
-def test_bez_pakietu_jezykowego_obce_imiona_niewykryte():
-    tekst = "Spotkanie z James Smith."
+def test_bez_pakietu_jezykowego_obcy_imie_nie_kotwiczy_pary():
+    """Bez załadowanego pakietu językowego danego kraju, obce imię nie
+    działa jako kotwica dla pary imię+nazwisko (nie ma go w żadnym
+    załadowanym słowniku imion). Używamy celowo nieistniejących słów,
+    żeby test nie zależał od tego, czy akurat są/nie są zarejestrowanym
+    nazwiskiem w PESEL (patrz test niżej — to się może zdarzyć)."""
+    from anonimizator.slowniki_recognizers import recognize_imiona_nazwiska
+    wyniki = recognize_imiona_nazwiska("Spotkanie z Xhavitem Zzqprothem.", jezyki=("pl",))
+    assert len(wyniki) == 0
+
+
+def test_nazwiska_pesel_obejmuja_tez_nazwiska_obcego_pochodzenia():
+    """WAŻNE ODKRYCIE przy integracji danych GUS: nazwiska_pl.txt to pełny
+    rejestr PESEL, nie "polski pakiet językowy" w tym samym sensie co
+    imiona_XX.txt — obejmuje wszystkie osoby zarejestrowane w Polsce,
+    w tym z nazwiskami obcego pochodzenia. 'Smith' i 'James' są realnie
+    zarejestrowanymi nazwiskami w PESEL, więc zostają wykryte jako
+    samodzielne nazwiska niezależnie od wybranych pakietów językowych
+    imion. To oczekiwane, poprawne działanie (recall > precyzja), nie błąd."""
+    tekst = "Kontrahentem jest firma reprezentowana przez pana Smith."
     wynik = anonimizuj_tekst(tekst, kategorie=["imiona_nazwiska"], jezyki=["pl"])
-    assert "James" in wynik.tekst_zanonimizowany  # brak pakietu UK -> nie wykryto
+    assert "[OSOBA_1]" in wynik.tekst_zanonimizowany
+    assert wynik.mapowanie["[OSOBA_1]"] == "Smith"
+
+
+def test_samodzielne_nazwisko_wykrywane_bez_poprzedzajacego_imienia():
+    """Główna nowa zdolność: nazwisko bez poprzedzającego, rozpoznanego
+    imienia jest teraz wykrywane (wcześniej — udokumentowane ograniczenie
+    w notatce o mechanizmie wykrywania — było to niemożliwe bez Trybu AI)."""
+    from anonimizator.slowniki_recognizers import recognize_imiona_nazwiska
+    wyniki = recognize_imiona_nazwiska("Rozmawiałem wczoraj z Kowalski.", jezyki=("pl",))
+    assert len(wyniki) == 1
+    assert wyniki[0].text == "Kowalski"
+
+
+def test_samodzielne_nazwisko_na_poczatku_zdania_nie_jest_wykrywane():
+    """Zabezpieczenie przed fałszywym trafieniem: słowo na samym początku
+    zdania nie jest sprawdzane jako samodzielne nazwisko, nawet jeśli jest
+    w słowniku — każde zdanie zaczyna się wielką literą, więc bez tego
+    zabezpieczenia zwykłe słowa pokrywające się z nazwiskami dawałyby
+    fałszywe trafienia."""
+    from anonimizator.slowniki_recognizers import recognize_imiona_nazwiska
+    tekst = "Kowalski przyszedł na spotkanie. Rozmawiałem wczoraj z Kowalski."
+    wyniki = recognize_imiona_nazwiska(tekst, jezyki=("pl",))
+    # tylko drugie wystąpienie (nie na początku zdania) powinno zostać wykryte
+    assert len(wyniki) == 1
+    assert wyniki[0].start == tekst.rindex("Kowalski")  # to drugie, nie pierwsze wystąpienie
 
 
 def test_nazwa_pliku_wynikowego_ma_przyrostek_anon_i_oryginalne_rozszerzenie(tmp_path):

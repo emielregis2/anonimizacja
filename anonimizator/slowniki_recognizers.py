@@ -55,6 +55,28 @@ def _miasta_dla_jezykow(jezyki: tuple[str, ...]) -> frozenset[str]:
     return frozenset(wynik)
 
 
+@lru_cache(maxsize=None)
+def _nazwiska_dla_jezykow(jezyki: tuple[str, ...]) -> frozenset[str]:
+    wynik: set[str] = set()
+    for jezyk in jezyki:
+        wynik |= _wczytaj_liste(f"nazwiska_{jezyk}.txt")
+    return frozenset(wynik)
+
+
+def _na_poczatku_zdania(text: str, pozycja: int) -> bool:
+    """Sprawdza, czy dane miejsce w tekście zaczyna nowe zdanie/linię —
+    używane jako zabezpieczenie przed fałszywym trafieniem samodzielnego
+    nazwiska na pierwszym słowie zdania (ten sam problem, który wcześniej
+    rozwiązano dla pary imię+nazwisko: pierwsze słowo zdania też jest pisane
+    wielką literą, niezależnie od tego, czy jest nazwiskiem, czy nie)."""
+    przed = text[:pozycja].rstrip(" \t")
+    if not przed:
+        return True
+    if przed.endswith("\n"):
+        return True
+    return przed[-1] in ".!?"
+
+
 SUFIKSY_FIRM = re.compile(
     r"\b(sp\.\s?z\s?o\.?o\.?|s\.a\.|sp\.\s?k\.|sp\.\s?j\.|spółka\s?akcyjna|"
     r"spółka\s?z\s?ograniczoną\s?odpowiedzialnością|ltd\.?|llc|gmbh|s\.r\.o\.?)\b",
@@ -85,30 +107,51 @@ def recognize_miasta(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match
 
 def recognize_imiona_nazwiska(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match]:
     """
-    Heurystyka: szukamy wystąpień znanych imion (jako zakotwiczenie), a nie
-    dowolnego wielkiego słowa na początku dopasowania — inaczej słowo
-    rozpoczynające zdanie (też pisane wielką literą) błędnie "zjadałoby"
-    kolejne słowo jako parę imię+nazwisko, np. "Sprawa Jan Kowalski"
-    dopasowałoby się jako ("Sprawa", "Jan"), pomijając "Kowalski".
-    Jeśli po imieniu następuje kolejne słowo pisane wielką literą, traktujemy
-    je jako potencjalne nazwisko i dołączamy do dopasowania.
+    Dwa niezależne mechanizmy, oba scalane w jedną kategorię "imiona_nazwiska":
 
-    Bez modelu NER to nadal przybliżenie — część nazwisk pisanych
-    samodzielnie (bez imienia w sąsiedztwie) NIE zostanie wykryta.
-    Zalecane uzupełnienie: Tryb AI (spaCy NER).
+    1. Kotwiczenie po imieniu: szukamy wystąpień znanych imion (jako
+       zakotwiczenie), a nie dowolnego wielkiego słowa na początku
+       dopasowania — inaczej słowo rozpoczynające zdanie (też pisane
+       wielką literą) błędnie "zjadałoby" kolejne słowo jako parę
+       imię+nazwisko, np. "Sprawa Jan Kowalski" dopasowałoby się jako
+       ("Sprawa", "Jan"), pomijając "Kowalski". Jeśli po imieniu następuje
+       kolejne słowo pisane wielką literą, traktujemy je jako potencjalne
+       nazwisko i dołączamy do dopasowania.
+
+    2. Samodzielne nazwisko (bez poprzedzającego imienia): sprawdzane
+       względem osobnego słownika nazwisk (nazwiska_XX.txt, dane GUS —
+       patrz dane_slownikowe/ZRODLA.md), ale TYLKO gdy słowo nie jest
+       pierwszym słowem zdania — to samo zabezpieczenie co wyżej, bo
+       inaczej każde zdanie zaczynające się od słowa, które przypadkiem
+       jest też czyimś nazwiskiem (np. "Kowal" jako zawód), dawałoby
+       fałszywe trafienie.
+
+    Nakładające się dopasowania (np. "Kowalski" z pary "Jan Kowalski"
+    ORAZ jako osobne, samodzielne dopasowanie na tej samej pozycji) są
+    poprawnie rozwiązywane przez _rozwiaz_nakladania w anonimizator.py
+    (dłuższe/wcześniejsze dopasowanie wygrywa) — nie trzeba tego obsługiwać
+    tutaj.
+
+    Bez modelu NER to nadal przybliżenie — odmienione formy nazwisk
+    ("Kowalskiego", "Kowalskim") nie są rozpoznawane, jeśli nie występują
+    dokładnie w tej postaci w słowniku. Zalecane uzupełnienie: Tryb AI.
     """
     imiona = _imiona_dla_jezykow(jezyki)
+    nazwiska = _nazwiska_dla_jezykow(jezyki)
     wyniki = []
     for m in re.finditer(r"\b[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż]+\b", text):
-        if m.group(0).lower() not in imiona:
-            continue
+        slowo_lower = m.group(0).lower()
         start, end = m.start(), m.end()
-        dopasowanie_nazwiska = re.match(
-            r"\s+([A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż]+)", text[end:end + 40]
-        )
-        if dopasowanie_nazwiska:
-            end += dopasowanie_nazwiska.end()
-        wyniki.append(Match(start, end, text[start:end], "imiona_nazwiska"))
+
+        if slowo_lower in imiona:
+            dopasowanie_nazwiska = re.match(
+                r"\s+([A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż]+)", text[end:end + 40]
+            )
+            if dopasowanie_nazwiska:
+                end += dopasowanie_nazwiska.end()
+            wyniki.append(Match(start, end, text[start:end], "imiona_nazwiska"))
+        elif slowo_lower in nazwiska and not _na_poczatku_zdania(text, start):
+            wyniki.append(Match(start, end, m.group(0), "imiona_nazwiska"))
     return wyniki
 
 
