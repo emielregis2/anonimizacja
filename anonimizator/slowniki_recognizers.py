@@ -13,16 +13,20 @@ sk (Słowacja), cz (Czechy). Dane wczytywane są z plików tekstowych w
 katalogu dane_slownikowe/ — łatwo dodać kolejny język, wystarczy dorzucić
 imiona_XX.txt i miasta_XX.txt.
 
-Bez modelu NER (spaCy, patrz ai_ner.py) te recognizery mają niższą
-precyzję i recall niż deterministyczne regexy z recognizers.py — nie
-stosują lematyzacji (odmiana przez przypadki nie jest rozpoznawana).
-Tryb AI pozwala to istotnie poprawić bez wysyłania danych na zewnątrz.
+Odmienione formy pojedynczych słów ("Kowalskiego", "Krakowie") są
+rozpoznawane przez lematyzację (Morfeusz2, patrz morfologia.py) — zawsze
+aktywna, jeśli pakiet jest zainstalowany, degraduje się bezpiecznie do
+samego dopasowania dokładnego, jeśli nie. Dopasowania wielowyrazowe
+(np. "Nowy Sącz") nie są lematyzowane — patrz ograniczenie przy
+recognize_miasta. Tryb AI (spaCy, patrz ai_ner.py) pozostaje dodatkowym
+uzupełnieniem dla przypadków spoza słownika w ogóle.
 """
 
 from __future__ import annotations
 import re
 from functools import lru_cache
 from pathlib import Path
+from . import morfologia
 from .recognizers import Match
 
 KATALOG_DANYCH = Path(__file__).parent / "dane_slownikowe"
@@ -106,7 +110,14 @@ def recognize_miasta(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match
     Tak jak przy samodzielnych nazwiskach: dopasowanie na samym początku
     zdania jest pomijane (zabezpieczenie przed częstymi fałszywymi
     trafieniami — pierwsze słowo zdania zawsze jest pisane wielką literą,
-    niezależnie od tego, czy przypadkiem pokrywa się z nazwą miejscowości)."""
+    niezależnie od tego, czy przypadkiem pokrywa się z nazwą miejscowości).
+
+    Lematyzacja (morfologia.pasuje_do_slownika) obejmuje tylko dopasowania
+    jednowyrazowe — "Krakowie" → "Kraków" zadziała, "Nowym Sączu" → "Nowy
+    Sącz" nie (lematyzacja fraz wielowyrazowych wymagałaby analizy każdego
+    słowa z osobna i rekonstrukcji lematu całej frazy — nie zaimplementowane,
+    niska wartość względem nakładu, bo większość miejscowości to jedno
+    słowo)."""
     miasta = _miasta_dla_jezykow(jezyki)
     wyniki = []
     for m in re.finditer(
@@ -114,10 +125,12 @@ def recognize_miasta(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match
         r"(\s[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż\-]+){0,2}\b",
         text,
     ):
-        if m.group(0).lower() in miasta and (
-            not _na_poczatku_zdania(text, m.start()) or _tylko_to_slowo(text, m.group(0))
+        dopasowanie = m.group(0)
+        pasuje = morfologia.pasuje_do_slownika(dopasowanie, dopasowanie.lower(), miasta)
+        if pasuje and (
+            not _na_poczatku_zdania(text, m.start()) or _tylko_to_slowo(text, dopasowanie)
         ):
-            wyniki.append(Match(m.start(), m.end(), m.group(0), "miasta"))
+            wyniki.append(Match(m.start(), m.end(), dopasowanie, "miasta"))
     return wyniki
 
 
@@ -148,28 +161,33 @@ def recognize_imiona_nazwiska(text: str, jezyki: tuple[str, ...] = ("pl",)) -> l
     (dłuższe/wcześniejsze dopasowanie wygrywa) — nie trzeba tego obsługiwać
     tutaj.
 
-    Bez modelu NER to nadal przybliżenie — odmienione formy nazwisk
-    ("Kowalskiego", "Kowalskim") nie są rozpoznawane, jeśli nie występują
-    dokładnie w tej postaci w słowniku. Zalecane uzupełnienie: Tryb AI.
+    Lematyzacja (morfologia.pasuje_do_slownika, patrz morfologia.py):
+    odmienione formy imion i samodzielnych nazwisk ("Kowalskiego",
+    "Kowalskim") są rozpoznawane, jeśli pakiet morfeusz2 jest zainstalowany
+    — bez niego zachowanie jest identyczne jak dopasowanie tylko dokładne.
+    Nazwisko doklejane po rozpoznanym imieniu (druga część pary) NIE jest
+    osobno sprawdzane względem słownika nazwisk — przyjmowane jest każde
+    kolejne słowo z wielkiej litery, tak jak wcześniej.
     """
     imiona = _imiona_dla_jezykow(jezyki)
     nazwiska = _nazwiska_dla_jezykow(jezyki)
     wyniki = []
     for m in re.finditer(r"\b[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż]+\b", text):
-        slowo_lower = m.group(0).lower()
+        slowo = m.group(0)
+        slowo_lower = slowo.lower()
         start, end = m.start(), m.end()
 
-        if slowo_lower in imiona:
+        if morfologia.pasuje_do_slownika(slowo, slowo_lower, imiona):
             dopasowanie_nazwiska = re.match(
                 r"\s+([A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż]+)", text[end:end + 40]
             )
             if dopasowanie_nazwiska:
                 end += dopasowanie_nazwiska.end()
             wyniki.append(Match(start, end, text[start:end], "imiona_nazwiska"))
-        elif slowo_lower in nazwiska and (
-            not _na_poczatku_zdania(text, start) or _tylko_to_slowo(text, m.group(0))
+        elif morfologia.pasuje_do_slownika(slowo, slowo_lower, nazwiska) and (
+            not _na_poczatku_zdania(text, start) or _tylko_to_slowo(text, slowo)
         ):
-            wyniki.append(Match(start, end, m.group(0), "imiona_nazwiska"))
+            wyniki.append(Match(start, end, slowo, "imiona_nazwiska"))
     return wyniki
 
 

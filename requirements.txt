@@ -13,6 +13,13 @@ reportlab>=4.4
 pyperclip>=1.11
 pytest>=8.0
 
+# Opcjonalnie, WYŁĄCZONE DOMYŚLNIE (morfologia.WLACZ_LEMATYZACJE = False) -
+# lematyzacja nazwisk/miejscowości (Kowalskiego -> Kowalski). Zainstalowane,
+# ale świadomie nieaktywne: odkryty crash przy współpracy z pymupdf w tym
+# samym procesie (patrz ostrzeżenie w anonimizator/morfologia.py) - włączać
+# tylko rozumiejąc to ryzyko.
+# morfeusz2>=1.99
+
 # Opcjonalnie, wyłącznie dla Trybu AI (lokalny NER, bez wysyłania danych na zewnątrz):
 # spacy>=3.7
 # oraz: python -m spacy download pl_core_news_lg

@@ -200,9 +200,13 @@ def test_samodzielne_nazwisko_na_poczatku_zdania_nie_jest_wykrywane():
 
 def test_miasto_na_poczatku_zdania_nie_jest_wykrywane():
     """To samo zabezpieczenie co przy nazwiskach, zastosowane do
-    rozszerzonego (58 025 pozycji) słownika miejscowości."""
+    rozszerzonego (58 025 pozycji) słownika miejscowości. Uwaga: "Polski"
+    celowo unikane w tym zdaniu — po wdrożeniu lematyzacji (Morfeusz2)
+    "Polski" ma wśród kandydatów na lemat "Polska", a to naprawdę
+    istnieje jako osobna miejscowość w TERYT (ten sam efekt co "Strona"/
+    "Dane" — świadomy kompromis recall/precyzja, nie błąd)."""
     from anonimizator.slowniki_recognizers import recognize_miasta
-    tekst = "Warszawa to stolica Polski. Mieszkam w Warszawa od lat."
+    tekst = "Warszawa to duże miasto. Mieszkam w Warszawa od lat."
     wyniki = recognize_miasta(tekst, jezyki=("pl",))
     assert len(wyniki) == 1
     assert wyniki[0].start == tekst.rindex("Warszawa")
@@ -210,12 +214,36 @@ def test_miasto_na_poczatku_zdania_nie_jest_wykrywane():
 
 def test_miasto_srodku_zdania_wykrywane():
     from anonimizator.slowniki_recognizers import recognize_miasta
-    # Mianownik celowo (brak lematyzacji w silniku bez Trybu AI — "Krakowie"
-    # jako forma odmieniona nie zostałoby dopasowane, to osobne, znane
-    # ograniczenie opisane w notatce o mechanizmie wykrywania).
     wyniki = recognize_miasta("Sprawa toczy się przed sądem w mieście Kraków.", jezyki=("pl",))
     assert len(wyniki) == 1
     assert wyniki[0].text == "Kraków"
+
+
+def test_lematyzacja_odmieniona_forma_nazwiska_wykrywana(tmp_path):
+    """Główny cel wdrożenia Morfeusz2: forma odmieniona ("Kowalskiego",
+    dopełniacz) jest teraz wykrywana, mimo że w słowniku jest tylko
+    mianownik ("Kowalski"). Test pomijany bez zainstalowanego morfeusz2."""
+    from anonimizator import morfologia
+    if not morfologia.dostepna_lematyzacja():
+        import pytest
+        pytest.skip("morfeusz2 niezainstalowany")
+    from anonimizator.slowniki_recognizers import recognize_imiona_nazwiska
+    wyniki = recognize_imiona_nazwiska("Rozmawiałem wczoraj z Kowalskiego.", jezyki=("pl",))
+    assert len(wyniki) == 1
+    assert wyniki[0].text == "Kowalskiego"
+
+
+def test_lematyzacja_odmieniona_forma_miasta_wykrywana():
+    """To samo dla miejscowości: "Krakowie" (miejscownik) wykrywane mimo
+    że w słowniku jest tylko "Kraków"."""
+    from anonimizator import morfologia
+    if not morfologia.dostepna_lematyzacja():
+        import pytest
+        pytest.skip("morfeusz2 niezainstalowany")
+    from anonimizator.slowniki_recognizers import recognize_miasta
+    wyniki = recognize_miasta("Sprawa toczy się przed sądem w Krakowie.", jezyki=("pl",))
+    assert len(wyniki) == 1
+    assert wyniki[0].text == "Krakowie"
 
 
 def test_izolowane_nazwisko_bez_reszty_zdania_wykrywane():
