@@ -326,6 +326,7 @@ def anonimizuj_plik(
     styl: str = "pelny_token",
     jezyki: list[str] | None = None,
     dolacz_prompt_ai: bool = True,
+    zachowaj_layout: bool = True,
 ) -> dict[str, Path]:
     """Pełny przepływ dla pojedynczego pliku.
 
@@ -334,8 +335,46 @@ def anonimizuj_plik(
     instruujący model AI, by zachował placeholdery bez zmian. Dzięki temu
     plik wynikowy jest od razu samowystarczalny — przydatne przy masowym,
     zautomatyzowanym przetwarzaniu całych serii dokumentów, bo każdy plik
-    "niesie" swój własny prompt bez ręcznego dopisywania."""
+    "niesie" swój własny prompt bez ręcznego dopisywania.
+
+    zachowaj_layout: gdy True (domyślnie) i format wejściowy to DOCX,
+    dokument jest edytowany w miejscu (formatowanie, tabele, obrazy,
+    nagłówki/stopki zachowane) zamiast budowany od nowa z gołego tekstu.
+    Ustaw False, by wymusić stary tryb "wyciągnij tekst -> zbuduj nowy
+    dokument" (np. do porównania albo jeśli plik sprawia problemy)."""
     katalog_wyjsciowy.mkdir(parents=True, exist_ok=True)
+    nazwa_bazowa = sciezka_wejsciowa.stem
+    rozszerzenie = sciezka_wejsciowa.suffix
+    sciezka_tekst = katalog_wyjsciowy / f"{nazwa_bazowa}_anon{rozszerzenie}"
+    sciezka_mapowanie = katalog_wyjsciowy / f"{nazwa_bazowa}_mapowanie.enc"
+
+    if zachowaj_layout and rozszerzenie.lower() == ".docx":
+        from . import layout_docx
+        silnik = SilnikAnonimizacji(styl=styl)
+        silnik._jezyki = tuple(jezyki or ["pl"])
+        layout_docx.anonimizuj_docx_zachowaj_layout(
+            sciezka_wejsciowa, sciezka_tekst, silnik,
+            kategorie=kategorie, tryb_ai=tryb_ai,
+            usun_numery_stron=usun_numery_stron,
+        )
+        prompt_dolaczony = ""
+        if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
+            prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
+            layout_docx.wstaw_prompt_do_docx(sciezka_tekst, prompt_dolaczony)
+        zaszyfrowane = crypto.zaszyfruj_mapowanie(silnik.mapowanie, haslo)
+        sciezka_mapowanie.write_bytes(zaszyfrowane)
+        return {
+            "tekst": sciezka_tekst,
+            "mapowanie": sciezka_mapowanie,
+            "liczba_wykryc": silnik.liczba_wykryc,
+            "mapowanie_jawne": silnik.mapowanie,
+            # Płaski tekst wynikowy do podglądu/kopiowania w interfejsie —
+            # sam plik DOCX ma zachowane formatowanie, to tylko pomocnicza
+            # reprezentacja tekstowa tego, co w nim jest.
+            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "prompt_ai": prompt_dolaczony,
+        }
+
     tekst = extractors.wczytaj_tekst(sciezka_wejsciowa)
 
     wynik = anonimizuj_tekst(
@@ -347,11 +386,6 @@ def anonimizuj_plik(
     if dolacz_prompt_ai and styl != "puste" and wynik.mapowanie:
         prompt_dolaczony = zbuduj_prompt_ai(wynik.mapowanie)
     tekst_do_zapisu = prompt_dolaczony + wynik.tekst_zanonimizowany
-
-    nazwa_bazowa = sciezka_wejsciowa.stem
-    rozszerzenie = sciezka_wejsciowa.suffix
-    sciezka_tekst = katalog_wyjsciowy / f"{nazwa_bazowa}_anon{rozszerzenie}"
-    sciezka_mapowanie = katalog_wyjsciowy / f"{nazwa_bazowa}_mapowanie.enc"
 
     extractors.zapisz_w_formacie(sciezka_tekst, tekst_do_zapisu)
     zaszyfrowane = crypto.zaszyfruj_mapowanie(wynik.mapowanie, haslo)

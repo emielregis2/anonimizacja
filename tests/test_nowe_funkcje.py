@@ -218,6 +218,19 @@ def test_miasto_srodku_zdania_wykrywane():
     assert wyniki[0].text == "Kraków"
 
 
+def test_izolowane_nazwisko_bez_reszty_zdania_wykrywane():
+    """Komórka tabeli / pole formularza zawierające WYŁĄCZNIE nazwisko
+    (bez żadnego innego tekstu) to nie jest "zdanie" w sensie zabezpieczenia
+    _na_poczatku_zdania — powinno zostać wykryte mimo pozycji 0."""
+    from anonimizator.slowniki_recognizers import recognize_imiona_nazwiska, recognize_miasta
+    assert len(recognize_imiona_nazwiska("Nowak", jezyki=("pl",))) == 1
+    assert len(recognize_miasta("Warszawa", jezyki=("pl",))) == 1
+    # ale prawdziwe zdanie zaczynające się od tego samego słowa nadal pomijane
+    assert len(recognize_imiona_nazwiska("Nowak i Kowalski złożyli pozew.", jezyki=("pl",))) == 1
+    wyniki = recognize_imiona_nazwiska("Nowak i Kowalski złożyli pozew.", jezyki=("pl",))
+    assert wyniki[0].text == "Kowalski"  # tylko drugie nazwisko, nie pierwsze (start zdania)
+
+
 def test_nazwa_pliku_wynikowego_ma_przyrostek_anon_i_oryginalne_rozszerzenie(tmp_path):
     p = tmp_path / "umowa.txt"
     p.write_text("Jan Kowalski podpisal umowe.")
@@ -342,3 +355,119 @@ def test_prompt_ai_w_trybie_jedna_sprawa_zawiera_tylko_tokeny_z_danego_pliku(tmp
     assert "[OSOBA_1]" in t1
     # plik b.txt wspomina obie osoby -> oba tokeny w jego promptcie
     assert "[OSOBA_1]" in t2 and "[OSOBA_2]" in t2
+
+
+def test_docx_zachowuje_formatowanie_pogrubienia(tmp_path):
+    """Kluczowy test nowej funkcjonalności: format wyjściowy DOCX zachowuje
+    layout (formatowanie) oryginału, zamiast budować dokument od nowa."""
+    import docx
+    p = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    akapit = dokument.add_paragraph()
+    akapit.add_run("Powód: ")
+    run_pogrubiony = akapit.add_run("Jan Kowalski")
+    run_pogrubiony.bold = True
+    akapit.add_run(" wnosi o zapłatę.")
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"],
+                             dolacz_prompt_ai=False)
+    assert wynik["tekst"].suffix == ".docx"
+
+    sprawdz = docx.Document(wynik["tekst"])
+    runy_z_tokenem = [r for r in sprawdz.paragraphs[0].runs if "[OSOBA_1]" in r.text]
+    assert len(runy_z_tokenem) == 1
+    assert runy_z_tokenem[0].bold is True
+
+
+def test_docx_podmiana_na_granicy_dwoch_runow(tmp_path):
+    """PII rozciągające się na dwa runy o różnym formatowaniu — powinno
+    zostać poprawnie wykryte i podmienione (cały placeholder w pierwszym
+    runie, nachodząca część wyczyszczona z drugiego)."""
+    import docx
+    p = tmp_path / "pismo2.docx"
+    dokument = docx.Document()
+    akapit = dokument.add_paragraph()
+    akapit.add_run("Jan").bold = True
+    akapit.add_run(" Kowalski").bold = False
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"],
+                             dolacz_prompt_ai=False)
+    sprawdz = docx.Document(wynik["tekst"])
+    pelny_tekst = "".join(r.text for r in sprawdz.paragraphs[0].runs)
+    assert pelny_tekst == "[OSOBA_1]"
+
+
+def test_docx_tabela_jest_anonimizowana(tmp_path):
+    import docx
+    p = tmp_path / "umowa.docx"
+    dokument = docx.Document()
+    tabela = dokument.add_table(rows=1, cols=2)
+    # Pierwsza komórka celowo pusta — przy bazie 68k imion + 598k nazwisk
+    # z PESEL każde "bezpieczne" słowo-etykieta ryzykuje przypadkowym
+    # trafieniem (już złapaliśmy "Strona" jako nazwisko i "Dane" jako
+    # imię przy pisaniu tego testu) — najpewniejszy test eliminuje
+    # tę zmienną zamiast szukać kolejnego "bezpiecznego" słowa.
+    tabela.cell(0, 1).text = "Nowak"
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    sprawdz = docx.Document(wynik["tekst"])
+    tekst_komorki = sprawdz.tables[0].cell(0, 1).text
+    assert "Nowak" not in tekst_komorki
+    assert "[OSOBA_1]" in tekst_komorki
+
+
+def test_docx_naglowek_jest_anonimizowany(tmp_path):
+    import docx
+    p = tmp_path / "pismo3.docx"
+    dokument = docx.Document()
+    dokument.sections[0].header.paragraphs[0].text = "Sprawa: Jan Kowalski"
+    dokument.add_paragraph("Treść bez danych osobowych.")
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    sprawdz = docx.Document(wynik["tekst"])
+    assert "Kowalski" not in sprawdz.sections[0].header.paragraphs[0].text
+
+
+def test_docx_layout_deanonimizacja_przywraca_oryginal(tmp_path):
+    """Pełny przepływ end-to-end: zapis z zachowaniem layoutu + automatyczny
+    prompt AI + deanonimizacja (usuwająca prompt, przywracająca oryginał)."""
+    import docx
+    from anonimizator import deanonimizuj_plik
+    from anonimizator.anonimizator import GRANICA_PROMPTU_AI
+    p = tmp_path / "pismo4.docx"
+    dokument = docx.Document()
+    dokument.add_paragraph("Klientem jest Kowalski, mieszkający w Warszawa.")
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!",
+                             kategorie=["imiona_nazwiska", "miasta"])
+    assert GRANICA_PROMPTU_AI in wynik["tekst_zanonimizowany"]
+
+    sciezka_wyjsciowa = tmp_path / "przywrocony.txt"
+    deanonimizuj_plik(wynik["tekst"], wynik["mapowanie"], "Haslo123!", sciezka_wyjsciowa)
+    przywrocony = sciezka_wyjsciowa.read_text(encoding="utf-8")
+    assert "Kowalski" in przywrocony
+    assert "Warszawa" in przywrocony
+    assert GRANICA_PROMPTU_AI not in przywrocony
+
+
+def test_docx_zachowaj_layout_false_uzywa_starej_sciezki(tmp_path):
+    """Jawne wyłączenie zachowaj_layout wraca do starego trybu
+    (wyciągnij tekst -> zbuduj dokument od nowa) — dla porównania/awaryjnie."""
+    import docx
+    p = tmp_path / "pismo5.docx"
+    dokument = docx.Document()
+    akapit = dokument.add_paragraph()
+    akapit.add_run("Jan Kowalski").bold = True
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!",
+                             kategorie=["imiona_nazwiska"], zachowaj_layout=False)
+    sprawdz = docx.Document(wynik["tekst"])
+    # w starym trybie kazdy akapit budowany od nowa, wiec formatowanie
+    # (pogrubienie) nie jest zachowane
+    assert sprawdz.paragraphs[0].runs[0].bold is not True

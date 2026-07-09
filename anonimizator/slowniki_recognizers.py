@@ -77,6 +77,15 @@ def _na_poczatku_zdania(text: str, pozycja: int) -> bool:
     return przed[-1] in ".!?"
 
 
+def _tylko_to_slowo(text: str, dopasowanie: str) -> bool:
+    """True, gdy przekazany fragment tekstu (np. cały akapit / komórka
+    tabeli) w praktyce składa się wyłącznie z tego jednego dopasowania —
+    typowe dla izolowanych wartości (komórka tabeli z samym nazwiskiem,
+    pole formularza, nagłówek), gdzie zabezpieczenie "początek zdania"
+    nie ma sensu, bo to w ogóle nie jest zdanie."""
+    return text.strip() == dopasowanie
+
+
 SUFIKSY_FIRM = re.compile(
     r"\b(sp\.\s?z\s?o\.?o\.?|s\.a\.|sp\.\s?k\.|sp\.\s?j\.|spółka\s?akcyjna|"
     r"spółka\s?z\s?ograniczoną\s?odpowiedzialnością|ltd\.?|llc|gmbh|s\.r\.o\.?)\b",
@@ -105,7 +114,9 @@ def recognize_miasta(text: str, jezyki: tuple[str, ...] = ("pl",)) -> list[Match
         r"(\s[A-ZŁŚŻŹĆŃÓĄĘ][\wąćęłńóśźż\-]+){0,2}\b",
         text,
     ):
-        if m.group(0).lower() in miasta and not _na_poczatku_zdania(text, m.start()):
+        if m.group(0).lower() in miasta and (
+            not _na_poczatku_zdania(text, m.start()) or _tylko_to_slowo(text, m.group(0))
+        ):
             wyniki.append(Match(m.start(), m.end(), m.group(0), "miasta"))
     return wyniki
 
@@ -155,7 +166,9 @@ def recognize_imiona_nazwiska(text: str, jezyki: tuple[str, ...] = ("pl",)) -> l
             if dopasowanie_nazwiska:
                 end += dopasowanie_nazwiska.end()
             wyniki.append(Match(start, end, text[start:end], "imiona_nazwiska"))
-        elif slowo_lower in nazwiska and not _na_poczatku_zdania(text, start):
+        elif slowo_lower in nazwiska and (
+            not _na_poczatku_zdania(text, start) or _tylko_to_slowo(text, m.group(0))
+        ):
             wyniki.append(Match(start, end, m.group(0), "imiona_nazwiska"))
     return wyniki
 
