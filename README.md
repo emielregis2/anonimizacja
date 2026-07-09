@@ -255,12 +255,17 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
 
 ## Znane ograniczenia (uczciwie, żeby nie przemilczeć)
 
-- **Recognizery słownikowe nie stosują lematyzacji.** "Warszawy"
+- **Recognizery słownikowe nie stosują lematyzacji domyślnie.** "Warszawy"
   (dopełniacz) nie dopasuje się do wpisu "Warszawa". Tryb AI (spaCy)
-  istotnie to poprawia, jeśli zainstalowany. Rozważana alternatywa bez
-  pełnego modelu NER: analizator morfologiczny (Morfeusz2) sprowadzający
-  słowo do formy podstawowej przed porównaniem ze słownikiem — nie
-  zaimplementowane.
+  istotnie to poprawia, jeśli zainstalowany. Lematyzacja przez Morfeusz2
+  (`anonimizator/morfologia.py`) jest **zaimplementowana i przetestowana,
+  ale domyślnie wyłączona** (`morfologia.WLACZ_LEMATYZACJE = False`) —
+  odkryto poważny, dwukierunkowy konflikt pamięciowy z PyMuPDF: użycie
+  fitz i Morfeusz2 w tym samym procesie (w dowolnej kolejności, nawet
+  w niepowiązanych plikach) powoduje twardy crash całego procesu
+  (naruszenie dostępu do pamięci, nie do złapania przez try/except).
+  Bezpieczne tylko dla procesów, które nigdy nie dotykają PDF. Włączać
+  świadomie, rozumiejąc to ryzyko — pełny opis w `morfologia.py`.
 - **OCR jakości zależnej od skanu.** Niska rozdzielczość, pochylone
   strony czy odręczne pismo obniżają skuteczność. 300 DPI (domyślne w
   module) to rozsądny punkt startowy.
@@ -312,6 +317,8 @@ anonimizator/
 │   ├── layout_docx.py            DOCX z zachowaniem formatowania/tabel/nagłówków
 │   ├── layout_pdf.py             PDF z prawdziwą redakcją przez PyMuPDF
 │   ├── layout_images.py          JPG/PNG + strony-skany PDF (redakcja OCR w miejscu)
+│   ├── morfologia.py             lematyzacja (Morfeusz2) — zaimplementowana,
+│   │                              domyślnie WYŁĄCZONA (patrz "Znane ograniczenia")
 │   ├── crypto.py                 szyfrowanie mapowania (PBKDF2 + Fernet)
 │   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP, prompt AI
 │   ├── deanonimizator.py         przywracanie oryginału (usuwa dopisany prompt AI)
@@ -323,13 +330,15 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        47 testów jednostkowych
+└── tests/                        49 testów jednostkowych (47 aktywnych +
+                                   2 pomijane, gdy lematyzacja wyłączona)
 ```
 
 ## Sugerowane następne kroki
 
-1. Lematyzacja (np. Morfeusz2) dla nazwisk/miejscowości — najskuteczniejsze
-   rozwiązanie problemu odmiany przez przypadki bez pełnego Trybu AI.
+1. Bezpieczna izolacja procesowa dla Morfeusz2 (osobny podproces/worker
+   zamiast współdzielenia procesu z PyMuPDF) — jedyny sposób na bezpieczne
+   włączenie już zaimplementowanej lematyzacji (patrz "Znane ograniczenia").
 2. Zachowanie layoutu dla trybu wsadowego "jedna sprawa" (dziś tylko
    pojedyncze pliki i tryb "niezależne" — patrz "Znane ograniczenia").
 3. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
