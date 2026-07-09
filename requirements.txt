@@ -8,17 +8,11 @@ flask>=3.0
 pytesseract>=0.3.13
 pdf2image>=1.17
 pillow>=10.0
+morfeusz2>=1.99
 pypdf>=5.9
 reportlab>=4.4
 pyperclip>=1.11
 pytest>=8.0
-
-# Opcjonalnie, WYŁĄCZONE DOMYŚLNIE (morfologia.WLACZ_LEMATYZACJE = False) -
-# lematyzacja nazwisk/miejscowości (Kowalskiego -> Kowalski). Zainstalowane,
-# ale świadomie nieaktywne: odkryty crash przy współpracy z pymupdf w tym
-# samym procesie (patrz ostrzeżenie w anonimizator/morfologia.py) - włączać
-# tylko rozumiejąc to ryzyko.
-# morfeusz2>=1.99
 
 # Opcjonalnie, wyłącznie dla Trybu AI (lokalny NER, bez wysyłania danych na zewnątrz):
 # spacy>=3.7

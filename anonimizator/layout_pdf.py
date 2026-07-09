@@ -54,26 +54,12 @@ def anonimizuj_pdf_zachowaj_layout(
     skan bez warstwy tekstowej I nie udało się ich zredagować (Tesseract
     niedostępny albo błąd OCR) — te strony wymagają ręcznej weryfikacji.
 
-    Lematyzacja (morfologia.py) jest tu celowo WYŁĄCZONA na czas całego
-    przetwarzania (morfologia.bez_lematyzacji()) — połączenie PyMuPDF
-    i Morfeusz2 w tym samym procesie powoduje odtworzony eksperymentalnie
-    crash (naruszenie dostępu do pamięci), patrz docstring morfologia.py.
-    Dopasowania w PDF ograniczają się więc do dokładnego dopasowania ze
-    słownikiem, bez rozpoznawania odmienionych form — tak jak przed
-    wdrożeniem lematyzacji."""
-    from . import morfologia
-    with morfologia.bez_lematyzacji():
-        return _anonimizuj_pdf_zachowaj_layout_impl(
-            sciezka_wejsciowa, sciezka_wyjsciowa, silnik,
-            kategorie=kategorie, tryb_ai=tryb_ai, usun_numery_stron=usun_numery_stron,
-        )
-
-
-def _anonimizuj_pdf_zachowaj_layout_impl(
-    sciezka_wejsciowa: Path, sciezka_wyjsciowa: Path, silnik,
-    kategorie: list[str] | None = None, tryb_ai: bool = False,
-    usun_numery_stron: bool = False,
-) -> list[int]:
+    Lematyzacja (morfologia.py) działa tu normalnie, tak jak dla innych
+    formatów — silnik lematyzacji (Morfeusz2) działa w odizolowanym
+    procesie roboczym właśnie po to, żeby dało się go bezpiecznie łączyć
+    z PyMuPDF w tej funkcji (patrz docstring morfologia.py: wcześniejsza
+    wersja wywoływała Morfeusz2 w tym samym procesie co fitz, co powodowało
+    crash — stąd izolacja procesowa, nie ręczne wyłączanie tutaj)."""
     import fitz
     dokument = fitz.open(str(sciezka_wejsciowa))
     strony_bez_warstwy_tekstowej = []

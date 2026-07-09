@@ -1,59 +1,65 @@
 """
-Lematyzacja — cienka warstwa nad Morfeusz2 (analizator morfologiczny dla
-języka polskiego), pozwalająca recognizerom słownikowym dopasowywać
-odmienione formy słów ("Kowalskiego", "Krakowie", "Warszawy") do ich formy
+Lematyzacja — pozwala recognizerom słownikowym dopasowywać odmienione
+formy słów ("Kowalskiego", "Krakowie", "Warszawy") do ich formy
 podstawowej w słowniku ("Kowalski", "Kraków", "Warszawa") — bez trzymania
 każdej możliwej odmiany w plikach dane_slownikowe/.
 
-Działa lokalnie (biblioteka Python z gotowym wheel dla Windows/Linux, zero
-komunikacji sieciowej) i — tak jak Tryb AI — degraduje się bezpiecznie do
-braku lematyzacji (tylko dokładne dopasowanie), jeśli pakiet `morfeusz2`
-nie jest zainstalowany.
+IZOLACJA PROCESOWA (ważne): silnik lematyzacji (Morfeusz2) działa
+w OSOBNYM PROCESIE SYSTEMOWYM (morfologia_worker.py), komunikującym się
+z resztą aplikacji przez potok stdin/stdout. To nie jest wybór
+architektoniczny dla wygody — to konieczność. Pierwsza próba wdrożenia
+(Morfeusz2 wywoływany bezpośrednio w tym samym procesie co reszta
+aplikacji) ujawniła twardy, dwukierunkowy konflikt pamięciowy z PyMuPDF
+(fitz): użycie obu bibliotek w jednym procesie, w dowolnej kolejności,
+powoduje naruszenie dostępu do pamięci — crash całego procesu,
+niemożliwy do złapania przez try/except, bo to nie jest wyjątek Pythona.
+Uruchomienie Morfeusz2 w zupełnie osobnym procesie eliminuje ten problem
+u źródła: dwie oddzielne przestrzenie adresowe fizycznie nie mogą sobie
+nawzajem uszkodzić pamięci.
 
-W przeciwieństwie do Trybu AI: to nie jest opcjonalny dodatek do włączenia
-w interfejsie, tylko zawsze aktywny, tani krok podstawowy — analiza
-morfologiczna jest deterministyczna i szybka (skompilowana biblioteka C++,
-nie model ML), więc nie ma powodu, żeby chować ją za checkboxem.
+Konsekwencje tego podejścia:
+  - Worker (morfologia_worker.py) jest uruchamiany raz, leniwie, przy
+    pierwszym użyciu — nie nowy proces na każde słowo (za wolne).
+  - Komunikacja to prosty protokół linia-JSON-na-linię-JSON przez potok.
+  - Odrobinę wolniejsze niż wywołanie w procesie (narzut IPC per słowo),
+    ale wciąż szybkie w praktyce (lokalny potok, nie sieć) i bezpieczne
+    do cache'owania (@lru_cache) — powtórzone słowa nie pytają workera
+    ponownie.
+  - Jeśli worker nie wystartuje (np. brak pakietu morfeusz2) albo padnie
+    w trakcie działania, lematyzacja cicho degraduje się do dopasowania
+    tylko dokładnego — dokładnie tak samo jak Tryb AI degraduje się,
+    gdy brakuje spaCy.
 
 Wymaga: pip install morfeusz2
-
-ZNANY, POWAŻNY PROBLEM ODKRYTY PRZY WDROŻENIU — LEMATYZACJA DOMYŚLNIE
-WYŁĄCZONA: interakcja Morfeusz2 z PyMuPDF (fitz) w tym samym procesie
-powoduje odtworzony eksperymentalnie, dwukierunkowy crash (naruszenie
-dostępu do pamięci, niemożliwe do złapania przez try/except — to nie jest
-wyjątek Pythona). Potwierdzone:
-  - fitz użyty w procesie, potem Morfeusz2 (nawet w innym, niepowiązanym
-    pliku) -> crash
-  - Morfeusz2 najpierw, potem fitz -> również crash
-  - TXT/DOCX/obrazy (JPG/PNG) + Morfeusz2, BEZ fitz w ogóle -> bezpieczne
-To oznacza ryzyko dla każdego długo działającego procesu (np. app.py),
-który choć raz przetworzy PDF — nie tylko dla samego przetwarzania PDF.
-Dlatego lematyzacja jest domyślnie WYŁĄCZONA (WLACZ_LEMATYZACJE = False
-poniżej) — świadome włączenie tylko jeśli wiesz, że Twój proces nigdy
-nie dotknie fitz/PDF, albo po znalezieniu bezpiecznej izolacji (np.
-osobny podproces dla Morfeusz2).
 """
 
 from __future__ import annotations
+import atexit
 import contextlib
+import json
+import os
+import subprocess
+import sys
+import threading
 from functools import lru_cache
+from pathlib import Path
 
-# Patrz ostrzeżenie w docstringu modułu wyżej — zmień świadomie, rozumiejąc
-# ryzyko crashu całego procesu przy jakimkolwiek użyciu PDF (fitz) w tym
-# samym procesie, w dowolnej kolejności.
-WLACZ_LEMATYZACJE = False
+WLACZ_LEMATYZACJE = True
 
-_MORF = None
-_PROBOWANO_ZALADOWAC = False
+_SCIEZKA_WORKERA = Path(__file__).parent / "morfologia_worker.py"
+_STAN_LOCK = threading.Lock()
+_PROCES: subprocess.Popen | None = None
+_WORKER_DOSTEPNY: bool | None = None  # None = jeszcze nie sprawdzone
 _WYLACZONA_TYMCZASOWO = False
 
 
 @contextlib.contextmanager
 def bez_lematyzacji():
-    """Tymczasowo wyłącza lematyzację w obrębie bloku `with` — używane
-    przez layout_pdf.py jako dodatkowe zabezpieczenie, na wypadek gdyby
-    WLACZ_LEMATYZACJE zostało kiedyś świadomie ustawione na True mimo
-    ostrzeżenia. Zagnieżdżalne."""
+    """Tymczasowo wyłącza lematyzację w obrębie bloku `with`. Zostawione
+    jako ogólny mechanizm (np. do testów porównawczych/debugowania) —
+    od czasu izolacji procesowej NIE jest już potrzebne jako obejście
+    konfliktu z PyMuPDF (ten problem jest rozwiązany architektonicznie),
+    więc layout_pdf.py go już nie używa."""
     global _WYLACZONA_TYMCZASOWO
     poprzednia = _WYLACZONA_TYMCZASOWO
     _WYLACZONA_TYMCZASOWO = True
@@ -63,18 +69,72 @@ def bez_lematyzacji():
         _WYLACZONA_TYMCZASOWO = poprzednia
 
 
+def _uruchom_worker_bez_locka() -> bool:
+    """Zakłada, że wywołujący trzyma już _STAN_LOCK."""
+    global _PROCES, _WORKER_DOSTEPNY
+    if _PROCES is not None and _PROCES.poll() is None:
+        return True
+    if _WORKER_DOSTEPNY is False:
+        return False
+    try:
+        srodowisko = dict(os.environ)
+        srodowisko["PYTHONIOENCODING"] = "utf-8"
+        proces = subprocess.Popen(
+            [sys.executable, str(_SCIEZKA_WORKERA)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
+            env=srodowisko,
+        )
+        proces.stdin.write(json.dumps(["_test_startu_"]) + "\n")
+        proces.stdin.flush()
+        odpowiedz = proces.stdout.readline()
+        if not odpowiedz:
+            raise RuntimeError("worker morfologii nie odpowiedział przy starcie")
+        wynik = json.loads(odpowiedz)
+        if isinstance(wynik, dict) and "__blad_startu__" in wynik:
+            raise RuntimeError(wynik["__blad_startu__"])
+        _PROCES = proces
+        _WORKER_DOSTEPNY = True
+        return True
+    except Exception:
+        _WORKER_DOSTEPNY = False
+        _PROCES = None
+        return False
+
+
 def dostepna_lematyzacja() -> bool:
-    global _MORF, _PROBOWANO_ZALADOWAC
     if not WLACZ_LEMATYZACJE or _WYLACZONA_TYMCZASOWO:
         return False
-    if not _PROBOWANO_ZALADOWAC:
-        _PROBOWANO_ZALADOWAC = True
+    with _STAN_LOCK:
+        return _uruchom_worker_bez_locka()
+
+
+def _zapytaj_worker(slowo: str) -> list[str] | None:
+    """Zwraca listę lematów albo None, jeśli worker jest niedostępny
+    (włącznie z sytuacją, w której padł w trakcie i restart się nie udał)."""
+    global _PROCES, _WORKER_DOSTEPNY
+    with _STAN_LOCK:
+        if not _uruchom_worker_bez_locka():
+            return None
         try:
-            import morfeusz2
-            _MORF = morfeusz2.Morfeusz()
+            _PROCES.stdin.write(json.dumps([slowo], ensure_ascii=False) + "\n")
+            _PROCES.stdin.flush()
+            linia = _PROCES.stdout.readline()
+            if not linia:
+                raise RuntimeError("worker morfologii zakończył działanie")
+            wynik = json.loads(linia)
+            return wynik[0]
         except Exception:
-            _MORF = None
-    return _MORF is not None
+            # Worker padł w trakcie dzialania - probujemy raz zrestartowac
+            # PRZY NASTEPNYM wywolaniu (nie tutaj, zeby nie ryzykowac petli
+            # awarii w jednym zapytaniu). Na razie: brak wyniku.
+            try:
+                _PROCES.kill()
+            except Exception:
+                pass
+            _PROCES = None
+            _WORKER_DOSTEPNY = None  # pozwól spróbować ponownie następnym razem
+            return None
 
 
 def lematy(slowo: str) -> frozenset[str]:
@@ -88,12 +148,7 @@ def lematy(slowo: str) -> frozenset[str]:
 
     Działa tylko na pojedynczych słowach (bez spacji) — dopasowania
     wielowyrazowe (np. "Nowy Sącz") pomijają ten krok, patrz ograniczenie
-    w slowniki_recognizers.py.
-
-    Sprawdzenie dostępności celowo NIE jest częścią cache'owanej funkcji
-    (_lematy_z_cache) — bez_lematyzacji() jest stanem tymczasowym, więc
-    scache'owanie wyniku "brak lematyzacji" dla danego słowa zatrułoby
-    późniejsze, prawidłowe wywołania poza blokiem `with`."""
+    w slowniki_recognizers.py."""
     if not dostepna_lematyzacja() or " " in slowo:
         return frozenset({slowo.lower()})
     return _lematy_z_cache(slowo)
@@ -101,24 +156,37 @@ def lematy(slowo: str) -> frozenset[str]:
 
 @lru_cache(maxsize=16384)
 def _lematy_z_cache(slowo: str) -> frozenset[str]:
-    wyniki = set()
-    for _start, _end, interpretacja in _MORF.analyse(slowo):
-        lemat = interpretacja[1]
-        # Lemat czasem ma dopisek gramatyczny po dwukropku, np.
-        # "Kowalski:Sm1" (S = nazwisko, m1 = rodzaj męskoosobowy) —
-        # interesuje nas tylko czysta forma podstawowa.
-        lemat_czysty = lemat.split(":")[0]
-        wyniki.add(lemat_czysty.lower())
-
-    if not wyniki:
-        wyniki.add(slowo.lower())
-    return frozenset(wyniki)
+    wynik = _zapytaj_worker(slowo)
+    if wynik:
+        return frozenset(wynik)
+    return frozenset({slowo.lower()})
 
 
 def pasuje_do_slownika(slowo: str, slowo_lower: str, slownik: frozenset[str]) -> bool:
     """Sprawdza, czy słowo (albo któryś z jego lematów) jest w słowniku.
     Dokładne dopasowanie sprawdzane jest jako pierwsze i najtańsze —
-    lematyzacja wywoływana tylko wtedy, gdy jest faktycznie potrzebna."""
+    lematyzacja (zapytanie do procesu roboczego) wywoływana tylko wtedy,
+    gdy jest faktycznie potrzebna."""
     if slowo_lower in slownik:
         return True
     return any(lemat in slownik for lemat in lematy(slowo))
+
+
+def zamknij_worker() -> None:
+    """Kończy proces roboczy, jeśli działa — wołane przy zamykaniu
+    aplikacji (atexit), żeby nie zostawiać osieroconych procesów."""
+    global _PROCES
+    with _STAN_LOCK:
+        if _PROCES is not None:
+            try:
+                _PROCES.stdin.close()
+            except Exception:
+                pass
+            try:
+                _PROCES.terminate()
+            except Exception:
+                pass
+            _PROCES = None
+
+
+atexit.register(zamknij_worker)

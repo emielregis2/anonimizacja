@@ -255,17 +255,21 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
 
 ## Znane ograniczenia (uczciwie, żeby nie przemilczeć)
 
-- **Recognizery słownikowe nie stosują lematyzacji domyślnie.** "Warszawy"
-  (dopełniacz) nie dopasuje się do wpisu "Warszawa". Tryb AI (spaCy)
-  istotnie to poprawia, jeśli zainstalowany. Lematyzacja przez Morfeusz2
-  (`anonimizator/morfologia.py`) jest **zaimplementowana i przetestowana,
-  ale domyślnie wyłączona** (`morfologia.WLACZ_LEMATYZACJE = False`) —
-  odkryto poważny, dwukierunkowy konflikt pamięciowy z PyMuPDF: użycie
-  fitz i Morfeusz2 w tym samym procesie (w dowolnej kolejności, nawet
-  w niepowiązanych plikach) powoduje twardy crash całego procesu
-  (naruszenie dostępu do pamięci, nie do złapania przez try/except).
-  Bezpieczne tylko dla procesów, które nigdy nie dotykają PDF. Włączać
-  świadomie, rozumiejąc to ryzyko — pełny opis w `morfologia.py`.
+- **Recognizery słownikowe stosują lematyzację (Morfeusz2).** "Warszawy"
+  (dopełniacz) dopasowuje się do wpisu "Warszawa", "Kowalskiego" do
+  "Kowalski". Silnik lematyzacji działa w **odizolowanym procesie
+  roboczym** (`anonimizator/morfologia_worker.py`), komunikującym się
+  z resztą aplikacji przez potok stdin/stdout — nie w tym samym procesie,
+  co reszta programu. To nie jest wybór dla wygody: pierwsza wersja
+  (Morfeusz2 wywoływany bezpośrednio w tym samym procesie) ujawniła
+  twardy, dwukierunkowy konflikt pamięciowy z PyMuPDF (crash całego
+  procesu, niemożliwy do złapania przez try/except) — izolacja procesowa
+  usuwa ten problem u źródła. Jeśli worker nie wystartuje (brak pakietu
+  `morfeusz2`) albo padnie w trakcie, lematyzacja cicho degraduje się do
+  dopasowania tylko dokładnego. Lematyzacja obejmuje tylko dopasowania
+  jednowyrazowe — frazy wielowyrazowe (np. "Nowy Sącz") jej nie
+  przechodzą. Tryb AI (spaCy) pozostaje uzupełnieniem dla przypadków
+  spoza słownika w ogóle, nie tylko odmiany.
 - **OCR jakości zależnej od skanu.** Niska rozdzielczość, pochylone
   strony czy odręczne pismo obniżają skuteczność. 300 DPI (domyślne w
   module) to rozsądny punkt startowy.
@@ -298,8 +302,18 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
   stanu silnika ze ścieżką edycji w miejscu per plik — nie zaimplementowane).
   Tryb "niezależne" pliki wspiera to w pełni, bo każdy plik przechodzi
   osobno przez zwykły `anonimizuj_plik()`.
+- **Kategoria bywa niejednoznaczna przy słowach istniejących w kilku
+  słownikach naraz.** Przy tak dużych bazach (598k nazwisk, 68k imion,
+  58k miejscowości) i lematyzacji zwiększającej ekspozycję na te kolizje,
+  część słów istnieje jednocześnie w kilku słownikach — np. "Bytom" to
+  zarówno realna miejscowość, jak i zarejestrowane nazwisko w PESEL.
+  Dane i tak zostają poprawnie zamaskowane, ale trafiają pod etykietą
+  kategorii o wyższym priorytecie (`imiona_nazwiska` przed `miastami` —
+  patrz sekcja "Rozwiązywanie konfliktów" w notatce o mechanizmie
+  wykrywania), nie zawsze tę najbardziej "intuicyjną". Świadomy skutek
+  uboczny, nie błąd.
 - **To nie jest gotowy "plug-and-play" produkt komercyjny** — architektura
-  i pipeline end-to-end są solidne i przetestowane (47 testów jednostkowych),
+  i pipeline end-to-end są solidne i przetestowane (49 testów jednostkowych),
   ale przed użyciem produkcyjnym z danymi rzeczywistymi
   klientów warto dostroić słowniki/progi na Waszych dokumentach.
 
@@ -317,8 +331,9 @@ anonimizator/
 │   ├── layout_docx.py            DOCX z zachowaniem formatowania/tabel/nagłówków
 │   ├── layout_pdf.py             PDF z prawdziwą redakcją przez PyMuPDF
 │   ├── layout_images.py          JPG/PNG + strony-skany PDF (redakcja OCR w miejscu)
-│   ├── morfologia.py             lematyzacja (Morfeusz2) — zaimplementowana,
-│   │                              domyślnie WYŁĄCZONA (patrz "Znane ograniczenia")
+│   ├── morfologia.py             lematyzacja (Morfeusz2) — klient IPC
+│   ├── morfologia_worker.py      lematyzacja — proces roboczy (izolacja
+│   │                              procesowa od PyMuPDF, patrz "Znane ograniczenia")
 │   ├── crypto.py                 szyfrowanie mapowania (PBKDF2 + Fernet)
 │   ├── anonimizator.py           silnik: style, tryb wsadowy, tryb BIP, prompt AI
 │   ├── deanonimizator.py         przywracanie oryginału (usuwa dopisany prompt AI)
@@ -330,25 +345,21 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        49 testów jednostkowych (47 aktywnych +
-                                   2 pomijane, gdy lematyzacja wyłączona)
+└── tests/                        49 testów jednostkowych
 ```
 
 ## Sugerowane następne kroki
 
-1. Bezpieczna izolacja procesowa dla Morfeusz2 (osobny podproces/worker
-   zamiast współdzielenia procesu z PyMuPDF) — jedyny sposób na bezpieczne
-   włączenie już zaimplementowanej lematyzacji (patrz "Znane ograniczenia").
-2. Zachowanie layoutu dla trybu wsadowego "jedna sprawa" (dziś tylko
+1. Zachowanie layoutu dla trybu wsadowego "jedna sprawa" (dziś tylko
    pojedyncze pliki i tryb "niezależne" — patrz "Znane ograniczenia").
-3. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
+2. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
    `pl` — o ile dokumenty realnie zawierają dane z tych krajów.
-4. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
+3. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
    realnych, ale niewrażliwych dokumentach testowych.
-5. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
+4. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
    OCR na rzeczywistych dokumentach firmowych bywa różna.
-6. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
+5. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
    sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.
-7. Przed ewentualną dystrybucją poza organizację: rozstrzygnąć licencję
+6. Przed ewentualną dystrybucją poza organizację: rozstrzygnąć licencję
    PyMuPDF (AGPL v3 vs komercyjna Artifex) — patrz sekcja "Zachowanie
    layoutu oryginału" wyżej.
