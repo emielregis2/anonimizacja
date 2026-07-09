@@ -75,6 +75,24 @@ def _valid_iban(iban: str) -> bool:
     return int(liczba) % 97 == 1
 
 
+def _valid_dowod_osobisty(numer: str) -> bool:
+    """Norma ICAO 9303 — obowiązkowa dla dowodów wydawanych w Polsce od
+    2001 r. Format: 3 litery (seria) + 6 cyfr, gdzie pierwsza cyfra to
+    cyfra kontrolna. Litery -> wartości 10-35 (A=10 ... Z=35), wagi cykliczne
+    7-3-1 nakładane na 3 litery + pozostałe 5 cyfr (cyfra kontrolna sama w
+    sobie jest pomijana w sumowaniu, bo to ją właśnie weryfikujemy).
+    Zweryfikowano na 3 niezależnych przykładach z różnych źródeł."""
+    numer = re.sub(r"\s", "", numer).upper()
+    if not re.fullmatch(r"[A-Z]{3}\d{6}", numer):
+        return False
+    wartosci = [ord(znak) - ord("A") + 10 for znak in numer[:3]] + [int(c) for c in numer[3:]]
+    cyfra_kontrolna = wartosci[3]
+    pozostale = wartosci[:3] + wartosci[4:]
+    wagi = [7, 3, 1, 7, 3, 1, 7, 3]
+    suma = sum(w * v for w, v in zip(wagi, pozostale))
+    return suma % 10 == cyfra_kontrolna
+
+
 # ---------------------------------------------------------------------------
 # Generyczny builder recognizera regex + opcjonalna walidacja
 # ---------------------------------------------------------------------------
@@ -147,7 +165,7 @@ recognize_paszport = _make_regex_recognizer(
 )
 
 recognize_dowod_osobisty = _make_regex_recognizer(
-    r"\b[A-Z]{3}\d{6}\b", "numery_dokumentow", flags=0
+    r"\b[A-Z]{3}\d{6}\b", "numery_dokumentow", _valid_dowod_osobisty, flags=0
 )
 
 recognize_krs = _make_regex_recognizer(

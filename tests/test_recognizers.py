@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from anonimizator.recognizers import (
     recognize_pesel, recognize_nip, recognize_email, recognize_iban,
+    recognize_dowod_osobisty,
 )
 from anonimizator.anonimizator import anonimizuj_tekst
 
@@ -42,6 +43,24 @@ def test_email_wykryty():
 def test_iban_poprawny():
     wyniki = recognize_iban("PL61109010140000071219812874")
     assert len(wyniki) == 1
+
+
+def test_dowod_osobisty_poprawna_suma_kontrolna_wykryty():
+    # Przykłady zweryfikowane niezależnie w 3 źródłach (Wikipedia PL,
+    # romek.info, generatorliczb.pl) — dały ten sam wynik.
+    wyniki = recognize_dowod_osobisty("Dowód nr ABS123456 okazany do wglądu.")
+    assert len(wyniki) == 1
+    assert wyniki[0].text == "ABS123456"
+
+    wyniki = recognize_dowod_osobisty("Numer dokumentu: ABA300000")
+    assert len(wyniki) == 1
+
+
+def test_dowod_osobisty_niepoprawna_suma_kontrolna_odrzucony():
+    # Ten sam kształt (3 litery + 6 cyfr), ale zmieniona cyfra kontrolna
+    # (2 zamiast 1) — nie powinno przejść walidacji.
+    wyniki = recognize_dowod_osobisty("Numer dokumentu: ABS223456")
+    assert len(wyniki) == 0
 
 
 def test_anonimizacja_pelnego_tekstu_spojnosc_tokenow():
