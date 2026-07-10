@@ -16,6 +16,10 @@ python app.py          # interfejs webowy z drag & drop -> http://127.0.0.1:5000
 
 Na Windows: dwuklik na `start_anonimizator.bat`.
 
+**Bez Pythona na docelowym komputerze:** patrz sekcja "Dystrybucja jako
+samodzielny .exe" niżej — gotowy, spakowany `AnonimizatorGUI.exe` (~130 MB,
+zawiera wszystko poza Tesseract/Poppler/opcjonalnym Trybem AI).
+
 ## Status względem 9 funkcji referencyjnego produktu
 
 Wszystkie 9 funkcji, o które prosiłeś, są teraz zaimplementowane:
@@ -348,7 +352,7 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        69 testów jednostkowych
+└── tests/                        70 testów jednostkowych
 ```
 
 ## Tryb AI — wyniki realnego testowania
@@ -424,6 +428,89 @@ próbuje uruchomić go od nowa, co prowadzi do błędu bootstrapowania albo
 rekurencyjnego odpalania całego skryptu — potwierdzone empirycznie przy
 tej sesji.
 
+## Dystrybucja jako samodzielny .exe (bez Pythona na docelowym komputerze)
+
+```powershell
+python -m PyInstaller --name AnonimizatorGUI --onefile --console --noupx `
+  --add-data "anonimizator\dane_slownikowe;anonimizator\dane_slownikowe" `
+  --add-data "anonimizator\czcionki;anonimizator\czcionki" `
+  --collect-all morfeusz2 `
+  --collect-all fitz `
+  --hidden-import tkinter `
+  --hidden-import tkinter.filedialog `
+  app.py
+```
+
+Buduje `dist\AnonimizatorGUI.exe` (~130 MB, jeden plik) z całym silnikiem,
+słownikami GUS i Morfeusz2 (jego słownik jest wbudowany w `morfeusz2.dll`,
+nie trzeba dowozić osobnego pliku danych). `--noupx` jest ważne — kompresja
+UPX potrafi zawiesić build na kilkanaście minut bez błędu (obserwowane
+empirycznie na tej maszynie, prawdopodobnie w kombinacji z antywirusem
+skanującym w locie każdy zapisywany plik). Pierwszy build trwa
+kilka–kilkanaście minut (analiza pełnego drzewa zależności); kolejne
+buildy z tym samym `AnonimizatorGUI.spec` w katalogu — sekundy, bo
+PyInstaller cache'uje analizę.
+
+**Ważne — jeśli w tym samym środowisku Python jest zainstalowane spaCy
+(Tryb AI), build niepotrzebnie ściąga za sobą całą gałąź zależności
+spaCy/pandas** (nawet gdy `app.py` importuje spaCy tylko leniwie wewnątrz
+funkcji) — to wydłuża i tak już długi build. Rozważcie budowanie
+w osobnym, czystym `venv` bez spaCy, jeśli to zacznie przeszkadzać.
+
+### Krytyczna pułapka znaleziona przy pierwszym buildzie: lematyzacja cicho nie działała
+
+Worker lematyzacji (`morfologia.py`) uruchamiał proces roboczy jako
+`subprocess.Popen([sys.executable, "morfologia_worker.py"])`. W zwykłym
+`python app.py` `sys.executable` to interpreter Pythona — działa. W
+spakowanym `.exe` **`sys.executable` to sam ten `.exe`**, a
+`morfologia_worker.py` nie istnieje jako osobny plik na dysku docelowej
+maszyny (jest spakowany do archiwum) — worker w ogóle nie startował.
+Ponieważ moduł ma wbudowaną bezpieczną degradację ("worker niedostępny ->
+dopasowanie tylko dokładne"), **nic nie krzyczało błędem — po prostu
+znikała cała lematyzacja**. Zmierzone bezpośrednio: dokument z formami
+odmienionymi ("Krakowie", "Kowalskiego") dawał **zero wykryć** w
+spakowanym `.exe`, mimo że te same dane w `python app.py` działały
+poprawnie.
+
+Naprawa (ten sam wzorzec co `multiprocessing.freeze_support()` na
+Windows): gdy `sys.frozen` jest prawdą, `morfologia.py` uruchamia **sam
+siebie** z flagą `--morfologia-worker-wewnetrzny`
+(`ARGUMENT_TRYBU_WORKERA` w `morfologia.py`) zamiast wywoływać skrypt.
+`app.py` i `cli.py` sprawdzają tę flagę jako dosłownie pierwszą rzecz —
+przed importem Flask i czegokolwiek innego — i przekazują sterowanie
+prosto do `morfologia_worker.main()`. Zweryfikowane end-to-end na
+realnie zbudowanym `.exe`: przed poprawką 0 wykryć na tekście z odmianami,
+po poprawce poprawne maskowanie obu form. Test regresyjny pilnujący
+spójności literału flagi między trzema miejscami:
+`test_flaga_workera_morfologii_spojna_w_app_i_cli`.
+
+**Ogólna lekcja (przydatna przy każdym kolejnym `PyInstaller` build w tym
+projekcie):** każdy mechanizm, który uruchamia `sys.executable` jako
+podproces z myślą "to będzie Python", trzeba osobno przetestować w
+spakowanej wersji — `sys.executable` w `.exe` PyInstallera to nie
+interpreter, tylko ten sam plik wykonywalny.
+
+### Co jest w środku, a co trzeba doinstalować na komputerze docelowym
+
+| Zależność | W `.exe`? | Uwaga |
+|---|---|---|
+| Silnik anonimizacji, słowniki GUS, czcionki | ✅ wbudowane | |
+| Morfeusz2 (lematyzacja) | ✅ wbudowane | słownik wbudowany w `morfeusz2.dll` |
+| python-docx, PyMuPDF (fitz), reportlab, pypdf, PIL | ✅ wbudowane | |
+| Tesseract OCR (skany PDF, JPG, PNG) | ❌ zewnętrzne | instalator z UB-Mannheim, pakiety `pol`+`eng` |
+| Poppler | ❌ zewnętrzne | wspomaga OCR skanów PDF |
+| Tryb AI (spaCy + `pl_core_news_lg`, ~570 MB) | ❌ zewnętrzne | wymaga Pythona na maszynie docelowej; zbyt duże, żeby sensownie pakować |
+
+Bez Tesseract/Poppler: pliki JPG/PNG i strony PDF będące czystym skanem
+nie zostaną przetworzone — aplikacja to **zgłasza** (widoczne w
+interfejsie/CLI), nie robi tego po cichu. Bez Trybu AI: aplikacja działa
+normalnie, po prostu bez dodatkowego wykrywania AI.
+
+`app.py` automatycznie otwiera przeglądarkę pod `http://127.0.0.1:5000`
+przy starcie (`threading.Timer` + `webbrowser.open`, 1,5 s opóźnienia) —
+wygodne przy uruchamianiu przez podwójne kliknięcie `.exe`, kiedy nie ma
+terminala z adresem pod ręką.
+
 ## Sugerowane następne kroki
 
 1. ~~Zachowanie layoutu dla trybu wsadowego "jedna sprawa"~~ — zrobione
@@ -450,3 +537,8 @@ tej sesji.
    przez `anonimizuj_wiele_plikow`, ale UI pokazuje ją tylko dla
    pojedynczego pliku — patrz `wynik["strony_bez_warstwy_tekstowej"]`,
    klucz per nazwa pliku).
+8. ~~Przygotować dystrybucję jako samodzielny .exe~~ — zrobione (patrz
+   "Dystrybucja jako samodzielny .exe" wyżej). Ewentualny kolejny krok:
+   zbudować analogicznie `cli.py` jako osobny `.exe` (dziś tylko `app.py`
+   jest spakowane), jeśli pojawi się potrzeba użycia z linii poleceń na
+   maszynie bez Pythona.
