@@ -68,16 +68,30 @@ def _nazwiska_dla_jezykow(jezyki: tuple[str, ...]) -> frozenset[str]:
 
 
 def _na_poczatku_zdania(text: str, pozycja: int) -> bool:
-    """Sprawdza, czy dane miejsce w tekście zaczyna nowe zdanie/linię —
+    """Sprawdza, czy dane miejsce w tekście zaczyna nowe zdanie/akapit —
     używane jako zabezpieczenie przed fałszywym trafieniem samodzielnego
     nazwiska na pierwszym słowie zdania (ten sam problem, który wcześniej
     rozwiązano dla pary imię+nazwisko: pierwsze słowo zdania też jest pisane
-    wielką literą, niezależnie od tego, czy jest nazwiskiem, czy nie)."""
+    wielką literą, niezależnie od tego, czy jest nazwiskiem, czy nie).
+
+    WAŻNE: pojedynczy znak nowej linii NIE jest traktowany jako początek
+    zdania — w prawdziwych dokumentach (PDF, DOCX, tekst po OCR) zdania
+    regularnie zawijają się na kolejny wiersz w połowie, więc słowo zaraz
+    po takim zawinięciu wcale nie jest gramatycznie na początku zdania.
+    Odkryte przy testowaniu na realistycznym dokumencie: "...przebywał w
+    \\nKrakowie..." (zawinięcie w środku zdania) w ogóle nie wykrywało
+    "Krakowie" przed tą poprawką — bezpośrednio przeciwne zasadzie
+    recall > precyzja przyjętej dla tego modułu. Granica akapitu (pusty
+    wiersz, "\\n\\n") nadal liczy się jako początek zdania, bo tam
+    faktycznie zaczyna się nowa, niezależna treść (np. kolejna komórka
+    tabeli, nowy nagłówek)."""
     przed = text[:pozycja].rstrip(" \t")
     if not przed:
         return True
-    if przed.endswith("\n"):
+    if przed.endswith("\n\n") or przed.endswith("\n\r\n"):
         return True
+    if przed.endswith("\n"):
+        return False
     return przed[-1] in ".!?"
 
 
