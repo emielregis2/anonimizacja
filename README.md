@@ -297,11 +297,14 @@ Presidio — każda kategoria to niezależny, testowalny moduł.
   wielojęzycznej, nie kompletna baza danych jak pakiet `pl`. Łatwo
   rozszerzyć, podmieniając pliki w `dane_slownikowe/` (patrz
   `ZRODLA.md` po wzór dokumentacji źródła danych).
-- **Tryb wsadowy "jedna sprawa" nie wspiera jeszcze zachowania layoutu** —
-  zawsze używa starego trybu, nawet dla DOCX/PDF (wymagałoby współdzielenia
-  stanu silnika ze ścieżką edycji w miejscu per plik — nie zaimplementowane).
-  Tryb "niezależne" pliki wspiera to w pełni, bo każdy plik przechodzi
-  osobno przez zwykły `anonimizuj_plik()`.
+- ~~Tryb wsadowy "jedna sprawa" nie wspiera jeszcze zachowania layoutu~~ —
+  **rozwiązane.** DOCX/PDF/JPG/PNG w trybie "jedna sprawa" są teraz
+  edytowane w miejscu tak samo jak przy pojedynczym pliku, a jedna,
+  współdzielona instancja `SilnikAnonimizacji` przechodzi kolejno przez
+  wszystkie pliki sprawy, więc numeracja tokenów zostaje spójna nawet
+  w partiach mieszających formaty (np. DOCX + TXT tej samej sprawy).
+  Pliki bez wsparcia layoutu (np. `.txt`, `.rtf`) nadal korzystają ze
+  starej ścieżki "wyciągnij tekst -> zbuduj dokument od nowa".
 - **Kategoria bywa niejednoznaczna przy słowach istniejących w kilku
   słownikach naraz.** Przy tak dużych bazach (598k nazwisk, 68k imion,
   58k miejscowości) i lematyzacji zwiększającej ekspozycję na te kolizje,
@@ -345,13 +348,14 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        49 testów jednostkowych
+└── tests/                        56 testów jednostkowych
 ```
 
 ## Sugerowane następne kroki
 
-1. Zachowanie layoutu dla trybu wsadowego "jedna sprawa" (dziś tylko
-   pojedyncze pliki i tryb "niezależne" — patrz "Znane ograniczenia").
+1. ~~Zachowanie layoutu dla trybu wsadowego "jedna sprawa"~~ — zrobione
+   (DOCX/PDF/JPG/PNG, spójna numeracja tokenów nawet w partiach
+   mieszających formaty — patrz "Znane ograniczenia").
 2. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
    `pl` — o ile dokumenty realnie zawierają dane z tych krajów.
 3. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
@@ -363,3 +367,8 @@ anonimizator/
 6. Przed ewentualną dystrybucją poza organizację: rozstrzygnąć licencję
    PyMuPDF (AGPL v3 vs komercyjna Artifex) — patrz sekcja "Zachowanie
    layoutu oryginału" wyżej.
+7. Wpiąć w `app.py` wyświetlanie `strony_bez_warstwy_tekstowej` dla
+   trybu wsadowego "jedna sprawa" (dziś ta informacja jest zwracana
+   przez `anonimizuj_wiele_plikow`, ale UI pokazuje ją tylko dla
+   pojedynczego pliku — patrz `wynik["strony_bez_warstwy_tekstowej"]`,
+   klucz per nazwa pliku).
