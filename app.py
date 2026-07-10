@@ -821,4 +821,11 @@ def zamknij_sesje(sesja_id):
 
 if __name__ == "__main__":
     print("Uruchamiam lokalnie: http://127.0.0.1:5000  (Ctrl+C aby zatrzymać)")
+    # Automatyczne otwarcie przeglądarki — wygodne zwłaszcza przy uruchamianiu
+    # przez podwójne kliknięcie spakowanego .exe (bez terminala/adresu pod ręką).
+    # Osobny wątek z małym opóźnieniem, żeby zdążyć otworzyć przeglądarkę
+    # dopiero gdy serwer faktycznie już nasłuchuje (app.run() blokuje).
+    import threading
+    import webbrowser
+    threading.Timer(1.5, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
     app.run(host="127.0.0.1", port=5000, debug=False)
