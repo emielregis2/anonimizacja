@@ -348,8 +348,48 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        56 testów jednostkowych
+└── tests/                        65 testów jednostkowych
 ```
+
+## Tryb AI — wyniki realnego testowania
+
+Do tej sesji Tryb AI (spaCy `pl_core_news_lg`) miał gotową architekturę,
+ale nigdy nie był realnie przetestowany — żaden test w projekcie nie
+używał `tryb_ai=True`. Zainstalowano spaCy 3.8.13 + `pl_core_news_lg` i
+przetestowano na realistycznym (syntetycznym, ale wiarygodnym) piśmie
+procesowym — patrz `tests/test_tryb_ai.py`.
+
+**Zainstalowane i działające** na Python 3.14 / Windows — koła binarne
+(`blis`, `thinc`) dla cp314 są już dostępne na PyPI, instalacja
+bezproblemowa (`pip install spacy && python -m spacy download pl_core_news_lg`,
+model ok. 570 MB).
+
+**Realna wartość dodana (potwierdzona testem):**
+- Nazwiska/imiona spoza wszystkich załadowanych słowników językowych
+  (np. obce imię i nazwisko niewystępujące w żadnym pakiecie pl/uk/fr/sk/cz)
+  — całkowicie niewidoczne dla recognizerów słownikowych, wykrywane przez
+  Tryb AI.
+- Wieloczłonowe nazwy firm bywają poprawniej grupowane przez NER niż przez
+  recognizer słownikowy nazwisk, który potrafi złapać tylko fragment nazwy
+  jako fałszywe trafienie kategorii "osoba" (kolizja słownikowa — patrz
+  niżej), zostawiając resztę nazwy odkrytą.
+
+**Znane ograniczenie modelu:** `pl_core_news_lg` czasem błędnie segmentuje
+skróty z kropkami na granicy nazwy, np. "Orlen S.A." bywa dzielone na
+"Orlen S." (organizacja) i "A." (osoba). Recall zostaje zachowany (cała
+wartość i tak znika z tekstu), ale kategoria bywa błędna. To ograniczenie
+samego modelu, nie błąd projektu — udokumentowane testem, żeby ewentualna
+zmiana przy aktualizacji modelu była widoczna.
+
+**Efekt uboczny tego testowania — znaleziony i naprawiony bug (niezwiązany
+z AI):** `_na_poczatku_zdania` w `slowniki_recognizers.py` traktowało
+KAŻDY pojedynczy znak nowej linii jako początek zdania. W realnych
+dokumentach (PDF, DOCX, tekst po OCR) zdania regularnie zawijają się na
+kolejny wiersz w połowie — to blokowało wykrycie słowa zaraz po takim
+zawinięciu, bezpośrednio przeciwko zasadzie recall > precyzja przyjętej
+dla tego modułu. Naprawione: tylko pusty wiersz (prawdziwa granica
+akapitu) liczy się teraz jako początek zdania, pojedyncze zawinięcie —
+nie.
 
 ## Sugerowane następne kroki
 
@@ -358,8 +398,12 @@ anonimizator/
    mieszających formaty — patrz "Znane ograniczenia").
 2. Rozszerzyć słowniki obcojęzyczne (UK/FR/SK/CZ) analogicznie do pakietu
    `pl` — o ile dokumenty realnie zawierają dane z tych krajów.
-3. Zainstalować i przetestować Tryb AI (`pl_core_news_lg`) na Waszych
-   realnych, ale niewrażliwych dokumentach testowych.
+3. ~~Zainstalować i przetestować Tryb AI (`pl_core_news_lg`)~~ — zrobione.
+   spaCy 3.8.13 + pl_core_news_lg zainstalowane i przetestowane na
+   realistycznym piśmie procesowym (patrz `tests/test_tryb_ai.py` i sekcja
+   "Tryb AI — wyniki realnego testowania" niżej). Przy okazji znaleziony
+   i naprawiony niezwiązany bug w recognizerach słownikowych (zawijanie
+   wiersza błędnie traktowane jako początek zdania).
 4. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
    OCR na rzeczywistych dokumentach firmowych bywa różna.
 5. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
