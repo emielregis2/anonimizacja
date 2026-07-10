@@ -136,12 +136,18 @@ def cmd_anonimizuj_wsadowo(args):
     jezyki = args.jezyki.split(",") if args.jezyki else ["pl"]
     haslo = _pobierz_haslo(args)
 
+    if args.rownolegle and args.tryb == "jedna_sprawa":
+        print("Uwaga: --rownolegle nie ma efektu w trybie jedna_sprawa "
+              "(spójna numeracja tokenów wymaga przetwarzania sekwencyjnego) "
+              "— kontynuuję sekwencyjnie.", file=sys.stderr)
+
     wynik = anonimizuj_wiele_plikow(
         sciezki, Path(args.katalog_wyjsciowy), haslo, tryb=args.tryb,
         kategorie=kategorie, tryb_ai=args.tryb_ai,
         usun_numery_stron=args.usun_numery_stron, styl=args.styl, jezyki=jezyki,
         dolacz_prompt_ai=not args.bez_promptu_ai,
         zachowaj_layout=not args.bez_zachowania_layoutu,
+        rownolegle=args.rownolegle,
     )
 
     print(f"Tryb: {wynik['tryb']}")
@@ -236,6 +242,15 @@ def main():
     p_wsad = subparsers.add_parser("anonimizuj-wsadowo", help="Anonimizuje wiele plików naraz")
     p_wsad.add_argument("pliki", nargs="+")
     p_wsad.add_argument("--tryb", default="niezalezne", choices=["jedna_sprawa", "niezalezne"])
+    p_wsad.add_argument("--rownolegle", nargs="?", type=int, const=True, default=False,
+                         metavar="N",
+                         help="Przetwarzaj pliki równolegle w oddzielnych procesach "
+                              "(tylko tryb niezalezne — jedna_sprawa zawsze zostaje "
+                              "sekwencyjny). Bez wartości: automatycznie tyle procesów, "
+                              "ile rdzeni CPU. Z liczbą: dokładnie tyle procesów, np. "
+                              "--rownolegle 4. Domyślnie wyłączone (sekwencyjnie) — "
+                              "dla małych/kilku plików sekwencyjne bywa szybsze, bo "
+                              "każdy proces wczytuje słowniki od nowa.")
     _dodaj_wspolne_argumenty(p_wsad)
     p_wsad.set_defaults(func=cmd_anonimizuj_wsadowo)
 

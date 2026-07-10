@@ -348,7 +348,7 @@ anonimizator/
 ├── cli.py                        interfejs linii poleceń
 ├── start_anonimizator.bat
 ├── requirements.txt
-└── tests/                        65 testów jednostkowych
+└── tests/                        69 testów jednostkowych
 ```
 
 ## Tryb AI — wyniki realnego testowania
@@ -391,6 +391,39 @@ dla tego modułu. Naprawione: tylko pusty wiersz (prawdziwa granica
 akapitu) liczy się teraz jako początek zdania, pojedyncze zawinięcie —
 nie.
 
+## Przetwarzanie równoległe — wyniki realnego testowania
+
+Tryb wsadowy "niezależne" (każdy plik ma w pełni niezależny stan) wspiera
+teraz `rownolegle=True/int` w `anonimizuj_wiele_plikow` — pliki są
+przetwarzane w oddzielnych procesach (`ProcessPoolExecutor`, omija GIL).
+Dostępne też z CLI (`--rownolegle [N]`) i w `app.py` (checkbox "Przetwarzaj
+równolegle", aktywny tylko dla trybu "Niezależne dokumenty").
+
+**Tryb "jedna sprawa" pozostaje zawsze sekwencyjny** — spójna numeracja
+tokenów wymaga współdzielonego silnika przetwarzanego w deterministycznej
+kolejności, co z definicji wyklucza równoległość. Flaga `rownolegle` jest
+w tym trybie po cichu ignorowana (patrz `tests/test_rownolegle.py`).
+
+**Realny wynik pomiaru** (8 rdzeni CPU, 16 plików ~kilkadziesiąt KB
+każdy): **1,34x** przyspieszenia — solidne, ale dalekie od liniowego.
+Powód: każdy proces roboczy musi od nowa wczytać ogromne słowniki GUS
+(598k nazwisk + 68k imion + 58k miast) z dysku, a przy Trybie AI również
+model spaCy — to koszt stały ponoszony raz na proces, niezależnie od
+liczby plików, który amortyzuje się dopiero przy większych partiach. Dla
+malutkich plików/małej liczby plików sekwencyjne przetwarzanie bywa
+wręcz **szybsze** niż równoległe (potwierdzone pomiarem) — stąd
+`rownolegle` domyślnie wyłączone.
+
+**Pułapka Windows przy własnych skryptach:** jeśli wywołujecie
+`anonimizuj_wiele_plikow(..., rownolegle=True)` z własnego skryptu (nie
+przez `app.py` ani `cli.py`, które już mają odpowiedni guard), kod
+uruchamiający musi być owinięty w `if __name__ == "__main__":` —
+standardowy wymóg `multiprocessing` na Windowsie (tryb "spawn"). Bez tego
+zabezpieczenia proces roboczy przy imporcie skryptu jako `__main__`
+próbuje uruchomić go od nowa, co prowadzi do błędu bootstrapowania albo
+rekurencyjnego odpalania całego skryptu — potwierdzone empirycznie przy
+tej sesji.
+
 ## Sugerowane następne kroki
 
 1. ~~Zachowanie layoutu dla trybu wsadowego "jedna sprawa"~~ — zrobione
@@ -406,8 +439,9 @@ nie.
    wiersza błędnie traktowane jako początek zdania).
 4. Testy na realnych skanach (nie tylko syntetycznych obrazach) — jakość
    OCR na rzeczywistych dokumentach firmowych bywa różna.
-5. Rozważyć równoległe przetwarzanie dużych partii plików (obecnie
-   sekwencyjne) — łatwe do dodania, jeśli batch okaże się wolny.
+5. ~~Rozważyć równoległe przetwarzanie dużych partii plików~~ — zrobione
+   (tryb "niezalezne" — patrz "Przetwarzanie równoległe" wyżej). Tryb
+   "jedna_sprawa" zostaje sekwencyjny z przyczyn architektonicznych.
 6. Przed ewentualną dystrybucją poza organizację: rozstrzygnąć licencję
    PyMuPDF (AGPL v3 vs komercyjna Artifex) — patrz sekcja "Zachowanie
    layoutu oryginału" wyżej.

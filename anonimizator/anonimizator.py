@@ -18,9 +18,12 @@ każdego pliku (tryb "Niezależne dokumenty") — patrz anonimizuj_wiele_plikow.
 """
 
 from __future__ import annotations
+import os
 import re
 import string
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from .recognizers import DETERMINISTIC_RECOGNIZERS, Match
@@ -465,6 +468,43 @@ def anonimizuj_plik(
     }
 
 
+def _anonimizuj_niezalezne_rownolegle(
+    sciezki: list[Path],
+    katalog_wyjsciowy: Path,
+    haslo: str,
+    *,
+    kategorie: list[str] | None,
+    tryb_ai: bool,
+    usun_numery_stron: bool,
+    styl: str,
+    jezyki: list[str] | None,
+    dolacz_prompt_ai: bool,
+    zachowaj_layout: bool,
+    liczba_procesow: int | None,
+) -> dict[str, dict]:
+    """Uruchamia anonimizuj_plik() dla wielu plików równolegle w oddzielnych
+    procesach — bezpieczne wyłącznie dla trybu "niezalezne" (patrz
+    docstring parametru rownolegle w anonimizuj_wiele_plikow). Funkcja
+    musi żyć na poziomie modułu (nie jako lokalna domknięcie), żeby
+    ProcessPoolExecutor mógł ją i jej argumenty zserializować (pickle) do
+    procesów roboczych na Windows (tryb "spawn")."""
+    n = len(sciezki)
+    liczba_procesow = min(liczba_procesow or (os.cpu_count() or 4), n)
+    zadanie = partial(
+        anonimizuj_plik, katalog_wyjsciowy=katalog_wyjsciowy, haslo=haslo,
+        kategorie=kategorie, tryb_ai=tryb_ai,
+        usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
+        dolacz_prompt_ai=dolacz_prompt_ai, zachowaj_layout=zachowaj_layout,
+    )
+    wyniki_per_plik: dict[str, dict] = {}
+    with ProcessPoolExecutor(max_workers=liczba_procesow) as executor:
+        przyszlosci = {executor.submit(zadanie, sciezka): sciezka for sciezka in sciezki}
+        for przyszlosc in as_completed(przyszlosci):
+            sciezka = przyszlosci[przyszlosc]
+            wyniki_per_plik[sciezka.name] = przyszlosc.result()
+    return wyniki_per_plik
+
+
 def anonimizuj_wiele_plikow(
     sciezki: list[Path],
     katalog_wyjsciowy: Path,
@@ -477,6 +517,7 @@ def anonimizuj_wiele_plikow(
     jezyki: list[str] | None = None,
     dolacz_prompt_ai: bool = True,
     zachowaj_layout: bool = True,
+    rownolegle: bool | int = False,
 ) -> dict:
     """
     Przetwarza wiele plików naraz.
@@ -502,6 +543,21 @@ def anonimizuj_wiele_plikow(
         w nim występują (nie całą, wspólną listę tokenów całej sprawy) —
         żeby prompt dołączony do konkretnego pisma miał sens w oderwaniu
         od pozostałych dokumentów sprawy.
+
+    rownolegle: dotyczy WYŁĄCZNIE trybu "niezalezne" — każdy plik ma tam
+        w pełni niezależny stan (własny silnik, własne mapowanie), więc
+        kolejność przetwarzania nie wpływa na wynik i pliki mogą być
+        przetwarzane równolegle w oddzielnych procesach (ProcessPoolExecutor
+        — omija GIL, realne przyspieszenie dla pracy zdominowanej przez
+        regex/słowniki, nie tylko I/O). Tryb "jedna_sprawa" zawsze zostaje
+        sekwencyjny niezależnie od tej flagi — spójna numeracja tokenów
+        wymaga współdzielonego silnika przetwarzanego w deterministycznej
+        kolejności, co wyklucza równoległość. Wartości: False (domyślnie,
+        sekwencyjnie) / True (automatycznie tyle procesów, ile rdzeni CPU)
+        / int (dokładna liczba procesów, ograniczona do liczby plików).
+        Przy tryb_ai=True każdy proces roboczy wczytuje model spaCy od
+        nowa przy pierwszym użyciu (kilka sekund) — dla małych partii ten
+        narzut może zniwelować zysk z równoległości.
     """
     if tryb not in ("jedna_sprawa", "niezalezne"):
         raise ValueError('tryb musi być "jedna_sprawa" albo "niezalezne"')
@@ -509,14 +565,23 @@ def anonimizuj_wiele_plikow(
     katalog_wyjsciowy.mkdir(parents=True, exist_ok=True)
 
     if tryb == "niezalezne":
-        wyniki_per_plik = {}
-        for sciezka in sciezki:
-            wyniki_per_plik[sciezka.name] = anonimizuj_plik(
-                sciezka, katalog_wyjsciowy, haslo,
+        if rownolegle and len(sciezki) > 1:
+            wyniki_per_plik = _anonimizuj_niezalezne_rownolegle(
+                sciezki, katalog_wyjsciowy, haslo,
                 kategorie=kategorie, tryb_ai=tryb_ai,
                 usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
                 dolacz_prompt_ai=dolacz_prompt_ai, zachowaj_layout=zachowaj_layout,
+                liczba_procesow=rownolegle if isinstance(rownolegle, int) and rownolegle is not True else None,
             )
+        else:
+            wyniki_per_plik = {}
+            for sciezka in sciezki:
+                wyniki_per_plik[sciezka.name] = anonimizuj_plik(
+                    sciezka, katalog_wyjsciowy, haslo,
+                    kategorie=kategorie, tryb_ai=tryb_ai,
+                    usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
+                    dolacz_prompt_ai=dolacz_prompt_ai, zachowaj_layout=zachowaj_layout,
+                )
         return {"tryb": tryb, "pliki": wyniki_per_plik}
 
 

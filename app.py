@@ -253,8 +253,11 @@ postaci jawnej.
 
   <div class="opcje" id="pasek_wiele_plikow" style="display:none">
     <span style="font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);letter-spacing:.3px">WIELE PLIKÓW:</span>
-    <label><input type="radio" name="tryb_wsad" value="niezalezne" checked> Niezależne dokumenty</label>
-    <label><input type="radio" name="tryb_wsad" value="jedna_sprawa"> Jedna sprawa (spójne tokeny)</label>
+    <label><input type="radio" name="tryb_wsad" value="niezalezne" checked onclick="odswiezRownolegle()"> Niezależne dokumenty</label>
+    <label><input type="radio" name="tryb_wsad" value="jedna_sprawa" onclick="odswiezRownolegle()"> Jedna sprawa (spójne tokeny)</label>
+    <label id="etykieta_rownolegle"><input type="checkbox" id="rownolegle"
+      title="Przetwarza pliki równolegle w oddzielnych procesach — dostępne tylko dla trybu 'Niezależne dokumenty' (tryb 'Jedna sprawa' wymaga spójnej, sekwencyjnej numeracji tokenów). Dla małej liczby/małych plików bywa wolniejsze niż sekwencyjnie, bo każdy proces wczytuje słowniki od nowa — opłaca się przy większych partiach.">
+      Przetwarzaj równolegle</label>
   </div>
 
   <div class="wiersz" style="margin-top:4px">
@@ -372,6 +375,16 @@ function ustawPliki(files) {
   document.getElementById('stan_pusty_pliki').style.display = PLIKI.length ? 'none' : 'block';
   document.getElementById('pasek_wiele_plikow').style.display = PLIKI.length > 1 ? 'flex' : 'none';
   document.getElementById('status_plikow').textContent = PLIKI.length;
+  odswiezRownolegle();
+}
+
+function odswiezRownolegle() {
+  const trybWsadRadio = document.querySelector('input[name=tryb_wsad]:checked');
+  const jednaSprawa = trybWsadRadio && trybWsadRadio.value === 'jedna_sprawa';
+  const checkbox = document.getElementById('rownolegle');
+  checkbox.disabled = jednaSprawa;
+  if (jednaSprawa) checkbox.checked = false;
+  document.getElementById('etykieta_rownolegle').style.opacity = jednaSprawa ? '0.4' : '1';
 }
 
 async function wybierzZDysku() {
@@ -393,6 +406,7 @@ async function wybierzZDysku() {
         '<br><em>Wynik zostanie zapisany obok pliku(ów) źródłowego(ych).</em>';
       document.getElementById('pasek_wiele_plikow').style.display = SCIEZKI_DYSK.length > 1 ? 'flex' : 'none';
       document.getElementById('status_plikow').textContent = SCIEZKI_DYSK.length;
+      odswiezRownolegle();
     }
   } finally {
     btn.disabled = false;
@@ -502,6 +516,7 @@ async function anonimizuj() {
   dane.append('raport_pdf', document.getElementById('raport_pdf').checked);
   const trybWsadRadio = document.querySelector('input[name=tryb_wsad]:checked');
   dane.append('tryb_wsad', trybWsadRadio ? trybWsadRadio.value : 'niezalezne');
+  dane.append('rownolegle', document.getElementById('rownolegle').checked);
   document.querySelectorAll('input[name=kat]:checked').forEach(el => dane.append('kategorie', el.value));
   document.querySelectorAll('input[name=jezyk]:checked').forEach(el => dane.append('jezyki', el.value));
 
@@ -636,6 +651,7 @@ def anonimizuj():
         tryb_bip = request.form.get("tryb_bip") == "true"
         chce_raport = request.form.get("raport_pdf") == "true"
         tryb_wsad = request.form.get("tryb_wsad", "niezalezne")
+        rownolegle = request.form.get("rownolegle") == "true"
         haslo = request.form.get("haslo", "")
         dolacz_prompt_ai = request.form.get("dolacz_prompt_ai", "true") == "true"
 
@@ -682,7 +698,7 @@ def anonimizuj():
                     sciezki_wejsciowe, katalog_wyjsciowy, haslo, tryb=tryb_wsad,
                     kategorie=kategorie, tryb_ai=tryb_ai,
                     usun_numery_stron=usun_numery_stron, styl=styl, jezyki=jezyki,
-                    dolacz_prompt_ai=dolacz_prompt_ai,
+                    dolacz_prompt_ai=dolacz_prompt_ai, rownolegle=rownolegle,
                 )
                 liczba_wykryc = wynik.get("liczba_wykryc", {})
                 mapowanie_jawne = wynik.get("mapowanie_jawne", {})
