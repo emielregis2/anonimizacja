@@ -6,3 +6,11 @@ venv/
 wynik/
 wynik_bip/
 .DS_Store
+
+# Artefakty budowania PyInstaller (.exe) — duże pliki binarne, nie kod
+build/
+dist/
+*.spec
+*.zip
+serwer.log
+serwer_bledy.log
