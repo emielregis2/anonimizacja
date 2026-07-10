@@ -34,6 +34,12 @@ import getpass
 import sys
 from pathlib import Path
 
+# MUSI być pierwsze — patrz identyczny fragment i wyjaśnienie w app.py.
+if len(sys.argv) > 1 and sys.argv[1] == "--morfologia-worker-wewnetrzny":
+    from anonimizator.morfologia_worker import main as _uruchom_worker_morfologii
+    _uruchom_worker_morfologii()
+    sys.exit(0)
+
 sys.path.insert(0, str(Path(__file__).parent))
 from anonimizator import (
     anonimizuj_plik, anonimizuj_wiele_plikow, anonimizuj_bip,

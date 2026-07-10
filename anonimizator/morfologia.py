@@ -46,6 +46,12 @@ from pathlib import Path
 
 WLACZ_LEMATYZACJE = True
 
+# Flaga rozpoznawana przez app.py/cli.py na samym starcie (przed
+# jakąkolwiek inną inicjalizacją) — pozwala spakowanemu .exe uruchomić
+# sam siebie jako proces roboczy lematyzacji zamiast (nieistniejącego na
+# docelowej maszynie) interpretera Pythona wywołującego osobny plik .py.
+ARGUMENT_TRYBU_WORKERA = "--morfologia-worker-wewnetrzny"
+
 _SCIEZKA_WORKERA = Path(__file__).parent / "morfologia_worker.py"
 _STAN_LOCK = threading.Lock()
 _PROCES: subprocess.Popen | None = None
@@ -79,8 +85,21 @@ def _uruchom_worker_bez_locka() -> bool:
     try:
         srodowisko = dict(os.environ)
         srodowisko["PYTHONIOENCODING"] = "utf-8"
+        if getattr(sys, "frozen", False):
+            # W spakowanym .exe (PyInstaller) sys.executable to sam ten
+            # .exe, nie interpreter Pythona — a morfologia_worker.py nie
+            # istnieje jako osobny plik na dysku docelowej maszyny (jest
+            # spakowany do archiwum). Zamiast uruchamiać skrypt, uruchamiamy
+            # SAM SIEBIE ze specjalną flagą, którą app.py/cli.py rozpoznają
+            # na starcie i przekazują sterowanie od razu do
+            # morfologia_worker.main(), zanim cokolwiek innego się załaduje
+            # (patrz odpowiedni fragment w app.py i cli.py). Ten sam wzorzec
+            # co multiprocessing.freeze_support() na Windows.
+            argumenty = [sys.executable, ARGUMENT_TRYBU_WORKERA]
+        else:
+            argumenty = [sys.executable, str(_SCIEZKA_WORKERA)]
         proces = subprocess.Popen(
-            [sys.executable, str(_SCIEZKA_WORKERA)],
+            argumenty,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
             env=srodowisko,

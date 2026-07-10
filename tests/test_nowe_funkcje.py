@@ -479,6 +479,24 @@ def test_tryb_wsadowy_jedna_sprawa_zachowaj_layout_false_uzywa_starej_sciezki(tm
     assert sprawdz.paragraphs[0].runs[0].bold is not True
 
 
+def test_flaga_workera_morfologii_spojna_w_app_i_cli(tmp_path):
+    """Regresja: app.py i cli.py mają zaszyty (celowo, dla szybkości
+    startu w spakowanym .exe) dosłowny literał flagi
+    '--morfologia-worker-wewnetrzny' zamiast importować
+    ARGUMENT_TRYBU_WORKERA z anonimizator.morfologia (import przez pakiet
+    ściągnąłby cały ciężki łańcuch zależności — patrz komentarz w app.py).
+    Ten test pilnuje, żeby literał nie rozjechał się z prawdziwą stałą,
+    gdyby ktoś ją kiedyś zmienił."""
+    from anonimizator.morfologia import ARGUMENT_TRYBU_WORKERA
+
+    tresc_app = Path(__file__).parent.parent.joinpath("app.py").read_text(encoding="utf-8")
+    tresc_cli = Path(__file__).parent.parent.joinpath("cli.py").read_text(encoding="utf-8")
+    assert ARGUMENT_TRYBU_WORKERA in tresc_app, \
+        "app.py nie zawiera aktualnej flagi ARGUMENT_TRYBU_WORKERA"
+    assert ARGUMENT_TRYBU_WORKERA in tresc_cli, \
+        "cli.py nie zawiera aktualnej flagi ARGUMENT_TRYBU_WORKERA"
+
+
 def test_docx_zachowuje_formatowanie_pogrubienia(tmp_path):
     """Kluczowy test nowej funkcjonalności: format wyjściowy DOCX zachowuje
     layout (formatowanie) oryginału, zamiast budować dokument od nowa."""

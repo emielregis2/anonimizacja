@@ -7,6 +7,20 @@ Uruchomienie: python app.py  →  http://127.0.0.1:5000
 """
 
 from __future__ import annotations
+import sys
+
+# MUSI być pierwsze, przed jakimkolwiek innym importem (Flask itd.):
+# gdy ten plik jest spakowany PyInstallerem (.exe), morfologia.py
+# uruchamia proces roboczy lematyzacji jako SAM SIEBIE z tą flagą
+# (bo w spakowanym .exe nie ma osobnego interpretera Pythona ani pliku
+# morfologia_worker.py na dysku) — patrz ARGUMENT_TRYBU_WORKERA
+# w anonimizator/morfologia.py. Sprawdzamy to od razu, zanim Flask i
+# reszta aplikacji zdąży się załadować, żeby worker startował szybko.
+if len(sys.argv) > 1 and sys.argv[1] == "--morfologia-worker-wewnetrzny":
+    from anonimizator.morfologia_worker import main as _uruchom_worker_morfologii
+    _uruchom_worker_morfologii()
+    sys.exit(0)
+
 import io
 import json
 import tempfile
@@ -27,6 +41,7 @@ from anonimizator.extractors import FORMATY_WSPIERANE
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB (wiele plików naraz)
+
 
 JEZYKI_ETYKIETY = {
     "pl": "Polski", "uk": "Wielka Brytania", "fr": "Francja",
