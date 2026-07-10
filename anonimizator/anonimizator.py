@@ -361,6 +361,10 @@ def anonimizuj_plik(
             kategorie=kategorie, tryb_ai=tryb_ai,
             usun_numery_stron=usun_numery_stron,
         )
+        # Tekst do podglądu/kopiowania czytamy PRZED dopisaniem promptu do
+        # pliku — inaczej doklejalibyśmy prompt_dolaczony po raz drugi,
+        # bo wstaw_prompt_do_docx już go wpisuje bezpośrednio do pliku.
+        tekst_bez_promptu = extractors.wczytaj_tekst(sciezka_tekst)
         prompt_dolaczony = ""
         if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
             prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
@@ -375,7 +379,7 @@ def anonimizuj_plik(
             # Płaski tekst wynikowy do podglądu/kopiowania w interfejsie —
             # sam plik DOCX ma zachowane formatowanie, to tylko pomocnicza
             # reprezentacja tekstowa tego, co w nim jest.
-            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "tekst_zanonimizowany": prompt_dolaczony + tekst_bez_promptu,
             "prompt_ai": prompt_dolaczony,
         }
 
@@ -388,6 +392,7 @@ def anonimizuj_plik(
             kategorie=kategorie, tryb_ai=tryb_ai,
             usun_numery_stron=usun_numery_stron,
         )
+        tekst_bez_promptu = extractors.wczytaj_tekst(sciezka_tekst)
         prompt_dolaczony = ""
         if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
             prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
@@ -399,7 +404,7 @@ def anonimizuj_plik(
             "mapowanie": sciezka_mapowanie,
             "liczba_wykryc": silnik.liczba_wykryc,
             "mapowanie_jawne": silnik.mapowanie,
-            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "tekst_zanonimizowany": prompt_dolaczony + tekst_bez_promptu,
             "prompt_ai": prompt_dolaczony,
         }
         if strony_bez_tekstu:
@@ -418,6 +423,7 @@ def anonimizuj_plik(
             sciezka_wejsciowa, sciezka_tekst, silnik,
             kategorie=kategorie, tryb_ai=tryb_ai,
         )
+        tekst_bez_promptu = extractors.wczytaj_tekst(sciezka_tekst)
         prompt_dolaczony = ""
         if dolacz_prompt_ai and styl != "puste" and silnik.mapowanie:
             prompt_dolaczony = zbuduj_prompt_ai(silnik.mapowanie)
@@ -429,7 +435,7 @@ def anonimizuj_plik(
             "mapowanie": sciezka_mapowanie,
             "liczba_wykryc": silnik.liczba_wykryc,
             "mapowanie_jawne": silnik.mapowanie,
-            "tekst_zanonimizowany": prompt_dolaczony + extractors.wczytaj_tekst(sciezka_tekst),
+            "tekst_zanonimizowany": prompt_dolaczony + tekst_bez_promptu,
             "prompt_ai": prompt_dolaczony,
         }
 
@@ -478,10 +484,14 @@ def anonimizuj_wiele_plikow(
     tryb="jedna_sprawa": wspólna numeracja tokenów i jedno wspólne, zaszyfrowane
         mapowanie dla wszystkich plików — ten sam "Jan Kowalski" w trzech
         dokumentach tej samej sprawy dostaje ten sam token wszędzie.
-        UWAGA: ten tryb NIE wspiera jeszcze zachowaj_layout — zawsze używa
-        starej ścieżki "wyciągnij tekst -> zbuduj dokument od nowa", nawet
-        dla DOCX/PDF. Wymagałoby to współdzielenia stanu silnika (spójna
-        numeracja) razem z edycją w miejscu per plik — nie zaimplementowane.
+        Wspiera zachowaj_layout: DOCX/PDF/JPG/PNG są edytowane w miejscu
+        (ta sama technika co anonimizuj_plik — layout_docx/layout_pdf/
+        layout_images), ale wszystkie pliki dzielą JEDNĄ instancję
+        SilnikAnonimizacji przekazywaną kolejno do każdego z nich, więc
+        numeracja tokenów zostaje spójna w całej sprawie niezależnie od
+        formatu. Pliki w formatach bez wsparcia layoutu (np. .txt, .rtf)
+        oraz każdy plik, gdy zachowaj_layout=False, nadal korzystają ze
+        starej ścieżki "wyciągnij tekst -> zbuduj dokument od nowa".
     tryb="niezalezne": każdy plik ma własną, niezależną numerację i własny
         plik mapowania (dokładnie jak przy pojedynczym anonimizuj_plik) —
         w pełni wspiera zachowaj_layout, bo każdy plik przechodzi osobno
@@ -510,28 +520,82 @@ def anonimizuj_wiele_plikow(
         return {"tryb": tryb, "pliki": wyniki_per_plik}
 
 
-    # tryb == "jedna_sprawa": jeden wspólny silnik na wszystkie pliki
+    # tryb == "jedna_sprawa": jeden wspólny silnik na wszystkie pliki, żeby
+    # ten sam podmiot dostał ten sam token we wszystkich dokumentach sprawy
+    # niezależnie od formatu (DOCX/PDF/obraz z zachowanym layoutem czy
+    # zwykły tekst budowany od nowa).
     silnik = SilnikAnonimizacji(styl=styl)
     silnik._jezyki = tuple(jezyki or ["pl"])
     sciezki_tekst = {}
     teksty_zanonimizowane = {}
+    strony_bez_warstwy_tekstowej = {}
+
+    FORMATY_LAYOUT_OBRAZ = (".jpg", ".jpeg", ".png")
 
     for sciezka in sciezki:
-        tekst = extractors.wczytaj_tekst(sciezka)
-        if usun_numery_stron:
-            tekst = _usun_numery_stron(tekst)
-        tekst_wynikowy = silnik.przetworz(tekst, kategorie=kategorie, tryb_ai=tryb_ai)
+        rozszerzenie = sciezka.suffix.lower()
+        sciezka_tekst = katalog_wyjsciowy / f"{sciezka.stem}_anon{sciezka.suffix}"
+        uzyto_layoutu = False
+
+        if zachowaj_layout and rozszerzenie == ".docx":
+            from . import layout_docx
+            layout_docx.anonimizuj_docx_zachowaj_layout(
+                sciezka, sciezka_tekst, silnik,
+                kategorie=kategorie, tryb_ai=tryb_ai,
+                usun_numery_stron=usun_numery_stron,
+            )
+            uzyto_layoutu = True
+        elif zachowaj_layout and rozszerzenie == ".pdf":
+            from . import layout_pdf
+            strony_bez_tekstu = layout_pdf.anonimizuj_pdf_zachowaj_layout(
+                sciezka, sciezka_tekst, silnik,
+                kategorie=kategorie, tryb_ai=tryb_ai,
+                usun_numery_stron=usun_numery_stron,
+            )
+            if strony_bez_tekstu:
+                strony_bez_warstwy_tekstowej[sciezka.name] = strony_bez_tekstu
+            uzyto_layoutu = True
+        elif zachowaj_layout and rozszerzenie in FORMATY_LAYOUT_OBRAZ:
+            from . import layout_images
+            layout_images.anonimizuj_obraz_zachowaj_layout(
+                sciezka, sciezka_tekst, silnik,
+                kategorie=kategorie, tryb_ai=tryb_ai,
+            )
+            uzyto_layoutu = True
+
+        if uzyto_layoutu:
+            # Plik już zapisany (zredagowany w miejscu), ale jeszcze BEZ
+            # promptu — czytamy płaski tekst teraz, przed ewentualnym
+            # dopisaniem promptu, żeby ustalić które tokeny faktycznie
+            # w nim wystąpiły i żeby nie doliczyć promptu do treści dwa razy.
+            tekst_wynikowy = extractors.wczytaj_tekst(sciezka_tekst)
+        else:
+            tekst = extractors.wczytaj_tekst(sciezka)
+            if usun_numery_stron:
+                tekst = _usun_numery_stron(tekst)
+            tekst_wynikowy = silnik.przetworz(tekst, kategorie=kategorie, tryb_ai=tryb_ai)
 
         tekst_do_zapisu = tekst_wynikowy
+        prompt_dolaczony = ""
         if dolacz_prompt_ai and styl != "puste":
             tokeny_w_tym_pliku = {
                 k: v for k, v in silnik.mapowanie.items() if k in tekst_wynikowy
             }
             if tokeny_w_tym_pliku:
-                tekst_do_zapisu = zbuduj_prompt_ai(tokeny_w_tym_pliku) + tekst_wynikowy
+                prompt_dolaczony = zbuduj_prompt_ai(tokeny_w_tym_pliku)
+                tekst_do_zapisu = prompt_dolaczony + tekst_wynikowy
 
-        sciezka_tekst = katalog_wyjsciowy / f"{sciezka.stem}_anon{sciezka.suffix}"
-        extractors.zapisz_w_formacie(sciezka_tekst, tekst_do_zapisu)
+        if uzyto_layoutu:
+            if prompt_dolaczony:
+                if rozszerzenie == ".docx":
+                    layout_docx.wstaw_prompt_do_docx(sciezka_tekst, prompt_dolaczony)
+                elif rozszerzenie == ".pdf":
+                    layout_pdf.wstaw_prompt_do_pdf(sciezka_tekst, prompt_dolaczony)
+                elif rozszerzenie in FORMATY_LAYOUT_OBRAZ:
+                    layout_images.wstaw_prompt_do_obrazu(sciezka_tekst, prompt_dolaczony)
+        else:
+            extractors.zapisz_w_formacie(sciezka_tekst, tekst_do_zapisu)
+
         sciezki_tekst[sciezka.name] = sciezka_tekst
         teksty_zanonimizowane[sciezka.name] = tekst_do_zapisu
 
@@ -539,7 +603,7 @@ def anonimizuj_wiele_plikow(
     zaszyfrowane = crypto.zaszyfruj_mapowanie(silnik.mapowanie, haslo)
     sciezka_mapowanie.write_bytes(zaszyfrowane)
 
-    return {
+    wynik_koncowy = {
         "tryb": tryb,
         "pliki_tekst": sciezki_tekst,
         "mapowanie": sciezka_mapowanie,
@@ -547,6 +611,9 @@ def anonimizuj_wiele_plikow(
         "liczba_wykryc": silnik.liczba_wykryc,
         "teksty_zanonimizowane": teksty_zanonimizowane,
     }
+    if strony_bez_warstwy_tekstowej:
+        wynik_koncowy["strony_bez_warstwy_tekstowej"] = strony_bez_warstwy_tekstowej
+    return wynik_koncowy
 
 
 def anonimizuj_bip(

@@ -385,6 +385,100 @@ def test_prompt_ai_w_trybie_jedna_sprawa_zawiera_tylko_tokeny_z_danego_pliku(tmp
     assert "[OSOBA_1]" in t2 and "[OSOBA_2]" in t2
 
 
+def test_tryb_wsadowy_jedna_sprawa_docx_zachowuje_layout_i_spojne_tokeny(tmp_path):
+    """Główny cel tej sesji: tryb "jedna sprawa" teraz wspiera
+    zachowaj_layout dla DOCX — formatowanie (pogrubienie) zostaje
+    zachowane, a mimo to numeracja tokenów jest spójna z drugim (zwykłym
+    tekstowym) plikiem tej samej sprawy."""
+    import docx
+    p1 = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    akapit = dokument.add_paragraph()
+    akapit.add_run("Powód: ")
+    run_pogrubiony = akapit.add_run("Jan Kowalski")
+    run_pogrubiony.bold = True
+    dokument.save(p1)
+
+    p2 = tmp_path / "kolejne_pismo.txt"
+    p2.write_text("Ponownie: Jan Kowalski potwierdza odbiór.", encoding="utf-8")
+
+    wynik = anonimizuj_wiele_plikow(
+        [p1, p2], tmp_path / "wynik", "Haslo123!",
+        tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
+        dolacz_prompt_ai=False,
+    )
+
+    sprawdz = docx.Document(wynik["pliki_tekst"]["pismo.docx"])
+    runy_z_tokenem = [r for r in sprawdz.paragraphs[0].runs if "[OSOBA_1]" in r.text]
+    assert len(runy_z_tokenem) == 1
+    assert runy_z_tokenem[0].bold is True
+
+    t2 = wynik["pliki_tekst"]["kolejne_pismo.txt"].read_text(encoding="utf-8")
+    assert "[OSOBA_1]" in t2, "ten sam Jan Kowalski powinien dostać ten sam token co w DOCX"
+
+
+def test_tryb_wsadowy_jedna_sprawa_docx_prompt_ai_bez_duplikacji(tmp_path):
+    """Prompt dla AI dopisywany do pliku z zachowanym layoutem w trybie
+    "jedna sprawa" nie powinien się dublować w zwróconym tekście."""
+    import docx
+    from anonimizator.anonimizator import GRANICA_PROMPTU_AI
+    p1 = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    dokument.add_paragraph("Sprawa dotyczy Jan Kowalski.")
+    dokument.save(p1)
+
+    wynik = anonimizuj_wiele_plikow(
+        [p1], tmp_path / "wynik", "Haslo123!",
+        tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
+    )
+    tekst = wynik["teksty_zanonimizowane"]["pismo.docx"]
+    assert tekst.count(GRANICA_PROMPTU_AI) == 1
+
+
+def test_tryb_wsadowy_jedna_sprawa_pdf_zachowuje_layout(tmp_path):
+    from reportlab.pdfgen import canvas
+    import fitz
+    p1 = tmp_path / "faktura.pdf"
+    c = canvas.Canvas(str(p1))
+    c.drawString(50, 750, "Odbiorca: Jan Kowalski")
+    c.save()
+
+    p2 = tmp_path / "drugie.txt"
+    p2.write_text("Jan Kowalski ponownie w tej sprawie.", encoding="utf-8")
+
+    wynik = anonimizuj_wiele_plikow(
+        [p1, p2], tmp_path / "wynik", "Haslo123!",
+        tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
+        dolacz_prompt_ai=False,
+    )
+    dokument = fitz.open(str(wynik["pliki_tekst"]["faktura.pdf"]))
+    tekst_strony = dokument[0].get_text()
+    dokument.close()
+    assert "Kowalski" not in tekst_strony
+    assert "[OSOBA_1]" in tekst_strony
+    assert "[OSOBA_1]" in wynik["pliki_tekst"]["drugie.txt"].read_text(encoding="utf-8")
+
+
+def test_tryb_wsadowy_jedna_sprawa_zachowaj_layout_false_uzywa_starej_sciezki(tmp_path):
+    """Jawne wyłączenie zachowaj_layout w trybie "jedna sprawa" nadal
+    wraca do starej ścieżki (formatowanie DOCX nie jest zachowane), tak
+    jak przy pojedynczym pliku."""
+    import docx
+    p1 = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    akapit = dokument.add_paragraph()
+    akapit.add_run("Jan Kowalski").bold = True
+    dokument.save(p1)
+
+    wynik = anonimizuj_wiele_plikow(
+        [p1], tmp_path / "wynik", "Haslo123!",
+        tryb="jedna_sprawa", kategorie=["imiona_nazwiska"],
+        zachowaj_layout=False,
+    )
+    sprawdz = docx.Document(wynik["pliki_tekst"]["pismo.docx"])
+    assert sprawdz.paragraphs[0].runs[0].bold is not True
+
+
 def test_docx_zachowuje_formatowanie_pogrubienia(tmp_path):
     """Kluczowy test nowej funkcjonalności: format wyjściowy DOCX zachowuje
     layout (formatowanie) oryginału, zamiast budować dokument od nowa."""
@@ -458,6 +552,38 @@ def test_docx_naglowek_jest_anonimizowany(tmp_path):
     wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
     sprawdz = docx.Document(wynik["tekst"])
     assert "Kowalski" not in sprawdz.sections[0].header.paragraphs[0].text
+
+
+def test_docx_layout_tekst_zanonimizowany_bez_duplikacji_promptu(tmp_path):
+    """Regresja: pole tekst_zanonimizowany (podgląd/kopiowanie w UI) nie
+    powinno zawierać promptu AI dwa razy — wcześniej wstaw_prompt_do_docx
+    dopisywał prompt do pliku, a potem był on doliczany po raz drugi przy
+    odczycie pliku z powrotem."""
+    import docx
+    p = tmp_path / "pismo.docx"
+    dokument = docx.Document()
+    dokument.add_paragraph("Sprawa dotyczy Jan Kowalski.")
+    dokument.save(p)
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst_zanonimizowany"].count(GRANICA_PROMPTU_AI) == 1
+
+
+def test_pdf_layout_tekst_zanonimizowany_bez_duplikacji_promptu(tmp_path):
+    from reportlab.pdfgen import canvas
+    p = tmp_path / "pismo.pdf"
+    c = canvas.Canvas(str(p))
+    c.drawString(50, 750, "Klient: Kowalski")
+    c.save()
+
+    wynik = anonimizuj_plik(p, tmp_path / "wynik", "Haslo123!", kategorie=["imiona_nazwiska"])
+    assert wynik["tekst_zanonimizowany"].count(GRANICA_PROMPTU_AI) == 1
+
+
+def test_obraz_layout_tekst_zanonimizowany_bez_duplikacji_promptu(tmp_path):
+    sciezka, _ = _obraz_testowy(tmp_path, "pismo.png", "Kontakt: test@firma.pl")
+    wynik = anonimizuj_plik(sciezka, tmp_path / "wynik", "Haslo123!", kategorie=["email"])
+    assert wynik["tekst_zanonimizowany"].count(GRANICA_PROMPTU_AI) == 1
 
 
 def test_docx_layout_deanonimizacja_przywraca_oryginal(tmp_path):
